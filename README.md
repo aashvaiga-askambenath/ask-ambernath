@@ -125,7 +125,7 @@ The initial migration inserts only category/configuration rows. There is no auto
 6. Verify `/api/health`, sign-up, email verification, login, password reset, owner application, moderation, and a real test order with the configured project before announcing the service.
 7. To use a custom domain, attach it in Render, complete the DNS records Render provides, wait for HTTPS provisioning, then update `APP_URL`, `CLIENT_ORIGIN`, and Supabase Auth URL allowlists to the final domain.
 
-Render injects `PORT`; do not commit or hard-code production secrets in `render.yaml`.
+The checked-in Blueprint selects Render's free web-service plan for preview/testing. Free services can spin down when idle and may have cold-start delays, so they are not recommended for a reliable live marketplace. Change `plan` to `starter` only after approving Render's current paid price in your Render account. Render injects `PORT`; do not commit or hard-code production secrets in `render.yaml`.
 
 ## Security and data behavior
 
