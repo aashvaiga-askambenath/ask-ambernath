@@ -1,0 +1,17 @@
+{
+  "name": "Ask Ambernath",
+  "short_name": "Ask Ambernath",
+  "description": "Find and book verified local services in Ambernath.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f5fc",
+  "theme_color": "#5d35d5",
+  "icons": [
+    {
+      "src": "/brand.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

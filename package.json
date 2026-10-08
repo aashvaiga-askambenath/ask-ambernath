@@ -1,0 +1,40 @@
+{
+  "name": "ask-ambernath-vscode",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "dev": "node server/dev.js",
+    "server": "node server/index.js",
+    "client": "vite --config client/vite.config.js",
+    "build": "vite build --config client/vite.config.js",
+    "start": "node server/start.js",
+    "test": "node --test",
+    "smoke": "node server/smoke.js",
+    "lint": "eslint --config eslint.config.cjs \"server/**/*.js\" \"client/src/**/*.{js,jsx}\" \"client/vite.config.js\""
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.75.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "compression": "^1.8.1",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.1.0",
+    "helmet": "^8.1.0",
+    "lucide-react": "^0.468.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "react-router-dom": "^7.18.4",
+    "vite": "^7.0.6",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "eslint": "^9.39.0",
+    "eslint-plugin-react": "^7.37.5",
+    "globals": "^16.5.0"
+  }
+}
