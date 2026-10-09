@@ -636,7 +636,8 @@ function createApp(config = validateEnvironment()) {
   }));
 
   app.get('/sitemap.xml', asyncRoute(async (req, res) => {
-    const { data, error } = await req.supabase.from('businesses').select('slug,categories!inner(is_active)').eq('is_active', true).eq('verification_status', 'verified').eq('online', true).eq('categories.is_active', true).limit(500);
+    if (!supabase) throw new HttpError(503, 'DATABASE_NOT_CONFIGURED', 'Marketplace services are not configured yet');
+    const { data, error } = await supabase.from('businesses').select('slug,categories!inner(is_active)').eq('is_active', true).eq('verification_status', 'verified').eq('online', true).eq('categories.is_active', true).limit(500);
     if (error) throw error;
     const urls = ['/', '/explore', '/ask', '/terms', '/privacy', '/cancellation', ...(data || []).map((item) => `/business/${item.slug}`)];
     const xml = urls.map((url) => `<url><loc>${escapeXml(new URL(url, config.appUrl).toString())}</loc></url>`).join('');

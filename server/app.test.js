@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { businessSchema, canAccessOrder, canTransition, mapBusiness, mapOrder, orderSchema, requireRole, validateEnvironment } = require('./app');
+const { businessSchema, canAccessOrder, canTransition, createApp, mapBusiness, mapOrder, orderSchema, requireRole, validateEnvironment } = require('./app');
 
 test('public business shape never reports ineligible businesses as online', () => {
   const business = mapBusiness({
@@ -125,5 +125,25 @@ test('production startup refuses missing privileged Supabase configuration', () 
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
+  }
+});
+
+test('sitemap reports a configuration error instead of crashing without Supabase', async () => {
+  const app = createApp({
+    environment: 'test',
+    appUrl: 'https://ask-ambernath.example',
+    clientOrigins: [],
+    databaseConfigured: false,
+  });
+  const server = app.listen(0, '127.0.0.1');
+  try {
+    await new Promise((resolve) => server.once('listening', resolve));
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/sitemap.xml`);
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), {
+      error: { code: 'DATABASE_NOT_CONFIGURED', message: 'Marketplace services are not configured yet' },
+    });
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
