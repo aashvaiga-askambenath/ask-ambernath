@@ -10,7 +10,7 @@ const { z } = require('zod');
 const { HttpError, asyncRoute } = require('./lib/errors');
 const { adminRoles, transitions, canTransition, canAccessOrder, mapService, mapBusiness, mapOrder, slugify, escapeFilter, escapeXml } = require('./lib/domain');
 const { authenticate, optionalAuthenticate, requireRole, validateUuidParam } = require('./middleware/auth');
-const { ownedBusiness, notify, audit } = require('./services/marketplace');
+const { ownedBusiness, activeCategoryById, notify, audit } = require('./services/marketplace');
 const { businessSchema, serviceSchema, addressSchema, orderSchema, reviewSchema, supportSchema, categorySchema } = require('./validators/schemas');
 
 function validateEnvironment() {
@@ -179,8 +179,7 @@ function createApp(config = validateEnvironment()) {
   app.post('/api/businesses', authenticate, requireRole('business_owner'), asyncRoute(async (req, res) => {
     const body = businessSchema.parse(req.body);
     const slug = `${slugify(body.name)}-${crypto.randomBytes(3).toString('hex')}`;
-    const { data: category, error: categoryError } = await req.supabase.from('categories').select('id').eq('slug', body.categoryId).eq('is_active', true).maybeSingle();
-    if (categoryError) throw categoryError;
+    const category = await activeCategoryById(req.supabase, body.categoryId);
     if (!category) throw new HttpError(400, 'INVALID_CATEGORY', 'Select an available category');
     const { data: business, error } = await req.supabase.from('businesses').insert({
       owner_id: req.user.id,

@@ -8,6 +8,13 @@ async function ownedBusiness(client, businessId, ownerId) {
   return data;
 }
 
+async function activeCategoryById(client, categoryId) {
+  const { data, error } = await client.from('categories')
+    .select('id').eq('id', categoryId).eq('is_active', true).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 async function notify(client, userId, type, title, message, data = {}) {
   const { error } = await client.from('notifications').insert({ user_id: userId, type, title, message, data });
   if (error) throw error;
@@ -20,4 +27,4 @@ async function audit(client, actorId, action, entityType, entityId, metadata) {
   if (error) throw error;
 }
 
-module.exports = { ownedBusiness, notify, audit };
+module.exports = { ownedBusiness, activeCategoryById, notify, audit };

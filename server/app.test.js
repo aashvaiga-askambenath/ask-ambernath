@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { businessSchema, canAccessOrder, canTransition, createApp, mapBusiness, mapOrder, orderSchema, requireRole, validateEnvironment } = require('./app');
+const { activeCategoryById } = require('./services/marketplace');
 
 test('public business shape never reports ineligible businesses as online', () => {
   const business = mapBusiness({
@@ -46,6 +47,20 @@ test('business onboarding schema validates required fields and bounds', () => {
   assert.equal(businessSchema.parse(valid).services[0].price, 150);
   assert.throws(() => businessSchema.parse({ ...valid, pincode: '42150' }));
   assert.throws(() => businessSchema.parse({ ...valid, services: [{ name: 'Visit', price: -1 }] }));
+});
+
+test('business onboarding looks up the selected active category by its UUID', async () => {
+  const expectedId = '1fd49958-bfa1-4b76-bda4-6ad3a8e29192';
+  const filters = [];
+  const query = {
+    select: (columns) => { assert.equal(columns, 'id'); return query; },
+    eq: (column, value) => { filters.push([column, value]); return query; },
+    maybeSingle: async () => ({ data: { id: expectedId }, error: null }),
+  };
+  const client = { from: (table) => { assert.equal(table, 'categories'); return query; } };
+
+  assert.deepEqual(await activeCategoryById(client, expectedId), { id: expectedId });
+  assert.deepEqual(filters, [['id', expectedId], ['is_active', true]]);
 });
 
 test('order request accepts only safe line items and strips client totals', () => {
