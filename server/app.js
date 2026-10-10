@@ -10,7 +10,7 @@ const { z } = require('zod');
 const { HttpError, asyncRoute } = require('./lib/errors');
 const { adminRoles, transitions, canTransition, canAccessOrder, mapService, mapBusiness, mapOrder, slugify, escapeFilter, escapeXml } = require('./lib/domain');
 const { authenticate, optionalAuthenticate, requireRole, validateUuidParam } = require('./middleware/auth');
-const { ownedBusiness, activeCategoryById, notify, audit } = require('./services/marketplace');
+const { ownedBusiness, activeCategoryById, getCheckoutFees, notify, audit } = require('./services/marketplace');
 const { businessSchema, serviceSchema, addressSchema, orderSchema, reviewSchema, supportSchema, categorySchema } = require('./validators/schemas');
 
 function validateEnvironment() {
@@ -126,6 +126,9 @@ function createApp(config = validateEnvironment()) {
     const { data, error } = await req.supabase.from('categories').select('id,name,slug,icon_key,description,sort_order').eq('is_active', true).order('sort_order');
     if (error) throw error;
     res.json({ categories: data });
+  }));
+  app.get('/api/checkout-config', asyncRoute(async (req, res) => {
+    res.json(await getCheckoutFees(req.supabase));
   }));
 
   app.get('/api/businesses', asyncRoute(async (req, res) => {

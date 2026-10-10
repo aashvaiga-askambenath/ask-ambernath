@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { businessSchema, canAccessOrder, canTransition, createApp, mapBusiness, mapOrder, orderSchema, requireRole, validateEnvironment } = require('./app');
-const { activeCategoryById } = require('./services/marketplace');
+const { activeCategoryById, getCheckoutFees } = require('./services/marketplace');
 
 test('public business shape never reports ineligible businesses as online', () => {
   const business = mapBusiness({
@@ -61,6 +61,20 @@ test('business onboarding looks up the selected active category by its UUID', as
 
   assert.deepEqual(await activeCategoryById(client, expectedId), { id: expectedId });
   assert.deepEqual(filters, [['id', expectedId], ['is_active', true]]);
+});
+
+test('checkout fee settings expose the database-configured fees accurately', async () => {
+  const query = {
+    select: (columns) => { assert.equal(columns, 'key,value'); return query; },
+    in: async (column, keys) => {
+      assert.equal(column, 'key');
+      assert.deepEqual(keys, ['platform_fee', 'delivery_fee']);
+      return { data: [{ key: 'platform_fee', value: 25 }, { key: 'delivery_fee', value: '10.5' }], error: null };
+    },
+  };
+  const client = { from: (table) => { assert.equal(table, 'app_settings'); return query; } };
+
+  assert.deepEqual(await getCheckoutFees(client), { platformFee: 25, deliveryFee: 10.5 });
 });
 
 test('order request accepts only safe line items and strips client totals', () => {

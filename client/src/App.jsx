@@ -273,6 +273,7 @@ function Checkout() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const publicList = useLoad('/businesses?limit=50');
+  const feeConfig = useLoad('/checkout-config');
   const business = publicList.data?.businesses?.find((entry) => entry.id === businessId);
   useEffect(() => { if (user) api.get('/addresses').then((data) => setAddresses(data.addresses)).catch(() => {}); }, [user?.id]);
   useEffect(() => {
@@ -323,6 +324,8 @@ function Checkout() {
     const service = business.services.find((entry) => entry.id === item.serviceId);
     return sum + (service ? service.price * item.quantity : 0);
   }, 0);
+  const platformFee = feeConfig.data?.platformFee ?? 0;
+  const deliveryFee = feeConfig.data?.deliveryFee ?? 0;
   return <Shell>
     <PageHead title="Checkout" text={`Order from ${business.name}`}/>
     <div className="checkout-grid"><form className="card checkout-form" onSubmit={placeOrder}>
@@ -342,8 +345,14 @@ function Checkout() {
       <label>Notes for the business (optional)<textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} maxLength={1000}/></label>
       <label>Payment method<select value={form.paymentMethod} onChange={(event) => setForm({ ...form, paymentMethod: event.target.value })}><option value="cash_on_service">Cash on service</option><option value="upi_on_service">UPI on service</option></select></label>
       {error && <p className="form-error" role="alert">{error}</p>}
-      <button className="primary-btn wide" disabled={busy || !items.length}>{busy ? 'Placing order…' : 'Place order'}</button>
-    </form><aside className="card summary"><h3>Order summary</h3><div><span>Services ({totalQuantity})</span><b>{money(subtotal)}</b></div><p className="muted-note">Any additional fees will be confirmed by the business before service.</p><hr/><div className="summary-total"><span>Subtotal</span><b>{money(subtotal)}</b></div></aside></div>
+      <button className="primary-btn wide" disabled={busy || !items.length || feeConfig.loading || Boolean(feeConfig.error)}>{busy ? 'Placing order…' : 'Place order'}</button>
+    </form><aside className="card summary"><h3>Order summary</h3><div><span>Services ({totalQuantity})</span><b>{money(subtotal)}</b></div>
+      {feeConfig.loading ? <p className="muted-note">Loading applicable fees…</p> : feeConfig.error ? <p className="form-error" role="alert">Fees couldn’t be confirmed. Try again before placing your order.</p> : <>
+        <div><span>Platform fee</span><b>{money(platformFee)}</b></div><div><span>Delivery fee</span><b>{money(deliveryFee)}</b></div>
+        <p className="muted-note">The fees shown above are included in your order total. Pay the business using your selected method after it accepts the request.</p>
+        <hr/><div className="summary-total"><span>Total</span><b>{money(subtotal + platformFee + deliveryFee)}</b></div>
+      </>}
+    </aside></div>
   </Shell>;
 }
 
@@ -828,7 +837,7 @@ function LegalPage({ title, content }) {
   return <Shell><PageHead title={title} text="Starter policy text — the business owner must have this reviewed and completed before public launch."/><article className="card legal-copy">{content.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}</article></Shell>;
 }
 const legalContent = {
-  terms: ['Ask Ambernath helps customers discover independent local businesses in Ambernath. Each listed business is responsible for its services, prices, availability, and fulfilment.', 'Orders and bookings are requests until accepted by the business. Any payment is made directly to the business using the method shown at checkout. Ask Ambernath does not claim that an offline payment has been received.', 'Users must provide accurate information and use the service lawfully. The platform may restrict accounts or listings to protect customers and local providers.', 'This generic starter text is not legal advice. The actual operating entity, governing law, dispute process, and final terms must be reviewed by qualified counsel before launch.'],
+  terms: ['Ask Ambernath helps customers discover independent local businesses in Ambernath. Each listed business is responsible for its services, prices, availability, and fulfilment.', 'Ask Ambernath may charge a platform fee and, where applicable, a delivery fee on an order. The applicable fee amounts and the full order total are shown at checkout before the customer places the request. Fees are recorded in the order and apply to that order; changes to fee settings apply to future orders. If no fee is shown at checkout, no platform or delivery fee is charged for that order.', 'Orders and bookings are requests until accepted by the business. Any payment is made directly to the business using the method shown at checkout. Ask Ambernath does not claim that an offline payment has been received.', 'Users must provide accurate information and use the service lawfully. The platform may restrict accounts or listings to protect customers and local providers.', 'This generic starter text is not legal advice. The actual operating entity, governing law, dispute process, and final terms must be reviewed by qualified counsel before public launch.'],
   privacy: ['The platform uses account, contact, address, order, review, and support information to provide marketplace features and respond to requests.', 'Authentication and production data are hosted by Supabase. Access is restricted by role and row-level security. Do not submit sensitive information that is not needed to fulfil a service.', 'Users may contact support to request help with their information. Retention periods, controller identity, legal basis, and the final rights process must be completed by the actual operating entity before launch.', 'This generic starter text is not a substitute for a privacy-law review. Add the real legal entity and final contact details before public launch.'],
   cancellation: ['Customers may cancel an order while it is pending. After a business accepts or begins work, contact the business to discuss changes or cancellation.', 'Service quality, refunds, and any amount due are handled directly between the customer and the independent provider unless a separate written platform policy states otherwise.', 'This generic starter policy must be reviewed and adapted to the real business model and applicable consumer-protection law before launch.'],
 };

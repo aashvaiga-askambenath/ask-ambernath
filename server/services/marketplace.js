@@ -15,6 +15,22 @@ async function activeCategoryById(client, categoryId) {
   return data;
 }
 
+async function getCheckoutFees(client) {
+  const { data, error } = await client.from('app_settings')
+    .select('key,value').in('key', ['platform_fee', 'delivery_fee']);
+  if (error) throw error;
+
+  const settings = Object.fromEntries((data || []).map(({ key, value }) => [key, Number(value)]));
+  const fees = {
+    platformFee: settings.platform_fee ?? 0,
+    deliveryFee: settings.delivery_fee ?? 0,
+  };
+  if (Object.values(fees).some((amount) => !Number.isFinite(amount) || amount < 0)) {
+    throw new Error('Checkout fee settings must be non-negative numbers');
+  }
+  return fees;
+}
+
 async function notify(client, userId, type, title, message, data = {}) {
   const { error } = await client.from('notifications').insert({ user_id: userId, type, title, message, data });
   if (error) throw error;
@@ -27,4 +43,4 @@ async function audit(client, actorId, action, entityType, entityId, metadata) {
   if (error) throw error;
 }
 
-module.exports = { ownedBusiness, activeCategoryById, notify, audit };
+module.exports = { ownedBusiness, activeCategoryById, getCheckoutFees, notify, audit };

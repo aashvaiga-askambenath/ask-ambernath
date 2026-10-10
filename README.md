@@ -52,7 +52,7 @@ The service-role key is used only in the Express process. Browser requests use t
 4. The migration configures:
    - `business-media`: public read for approved marketplace imagery; owner uploads must be under that owner's business UUID.
    - `verification-documents`: private PDF bucket; business owners can upload/read their own documents and administrators receive short-lived signed read URLs.
-5. Review the generated policies in the Supabase dashboard before launch. RLS is enabled on all application tables. Admins can manage platform and delivery fees from the dashboard; fee changes apply to new orders only. The API also validates bearer sessions, roles, ownership, and input. Never expose the service-role key to a client.
+5. Review the generated policies in the Supabase dashboard before launch. RLS is enabled on all application tables. Admins can manage platform and delivery fees from the dashboard; customers see the configured amounts and order total at checkout, and fee changes apply to new orders only. The API also validates bearer sessions, roles, ownership, and input. Never expose the service-role key to a client.
 
 ### First super administrator
 
