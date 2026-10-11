@@ -5,6 +5,21 @@ const path = require('node:path');
 const { businessSchema, canAccessOrder, canTransition, createApp, mapBusiness, mapCreatedOrder, mapOrder, orderSchema, requireRole, validateEnvironment } = require('./app');
 const { activeCategoryById, businessVerificationUpdate, businessImageColumn, getCheckoutFees } = require('./services/marketplace');
 
+test('order action buttons use clear imperative labels without changing status values', async () => {
+  const { orderActionLabel } = await import('../client/src/orderActions.mjs');
+  for (const [status, label] of [
+    ['Accepted', 'Accept'],
+    ['Rejected', 'Reject'],
+    ['Scheduled', 'Schedule'],
+    ['Cancelled', 'Cancel'],
+    ['Completed', 'Complete'],
+  ]) {
+    assert.equal(orderActionLabel('business_owner', status), label);
+  }
+  assert.equal(orderActionLabel('customer', 'Cancelled'), 'Cancel order');
+  assert.equal(orderActionLabel('customer', 'Accepted'), 'Accepted');
+});
+
 test('public business shape never reports ineligible businesses as online', () => {
   const business = mapBusiness({
     id: 'id',

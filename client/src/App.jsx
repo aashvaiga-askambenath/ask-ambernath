@@ -8,6 +8,7 @@ import {
 } from 'react-router-dom';
 import { api, supabase } from './api';
 import { useAuth } from './AuthContext';
+import { orderActionLabel } from './orderActions.mjs';
 
 const ToastContext = createContext(() => {});
 const roleNames = { customer: 'Customer', business_owner: 'Business owner', admin: 'Administrator', super_admin: 'Super admin' };
@@ -407,7 +408,7 @@ function OrderDetail() {
       <h3>Items</h3>{order.items.map((item) => <div className="line" key={item.id}><span>{item.itemName} × {item.quantity}</span><b>{money(item.lineTotal)}</b></div>)}
       <div className="summary-total"><span>Total</span><b>{money(order.total)}</b></div>
       <p className="muted-note">{order.paymentMethod === 'upi_on_service' ? 'UPI on service' : 'Cash on service'} · Payment is collected by the business at service time.</p>
-      {actions.length > 0 && <div className="action-row">{actions.map((status) => <button key={status} className={status === 'Rejected' || status === 'Cancelled' ? 'danger-btn' : 'primary-btn'} disabled={busy} onClick={() => changeStatus(status)}>{user?.role === 'business_owner' && status === 'Accepted' ? 'Accept' : status}</button>)}</div>}
+      {actions.length > 0 && <div className="action-row">{actions.map((status) => <button key={status} className={status === 'Rejected' || status === 'Cancelled' ? 'danger-btn' : 'primary-btn'} disabled={busy} onClick={() => changeStatus(status)}>{orderActionLabel(user?.role, status)}</button>)}</div>}
       {order.status === 'Completed' && user?.role === 'customer' && !reviewed && !order.hasReview && <form className="review-form" onSubmit={submitReview}><h3>How was the service?</h3><label>Rating<select value={rating} onChange={(event) => setRating(Number(event.target.value))}>{[5,4,3,2,1].map((value) => <option value={value} key={value}>{value} out of 5</option>)}</select></label><label>Comment (optional)<textarea maxLength={2000} value={comment} onChange={(event) => setComment(event.target.value)}/></label><button className="primary-btn" disabled={busy}>Submit review</button></form>}
       {(reviewed || order.hasReview) && <p role="status" className="muted-note">Thank you for your review.</p>}
       {order.status === 'Completed' && user?.role === 'customer' && <button className="ghost-btn reorder" onClick={() => {
