@@ -8,7 +8,7 @@ const rateLimit = require('express-rate-limit');
 const { createClient } = require('@supabase/supabase-js');
 const { z } = require('zod');
 const { HttpError, asyncRoute } = require('./lib/errors');
-const { adminRoles, transitions, canTransition, canAccessOrder, mapService, mapBusiness, mapOrder, slugify, escapeFilter, escapeXml } = require('./lib/domain');
+const { adminRoles, transitions, canTransition, canAccessOrder, mapService, mapBusiness, mapOrder, mapCreatedOrder, slugify, escapeFilter, escapeXml } = require('./lib/domain');
 const { authenticate, optionalAuthenticate, requireRole, validateUuidParam } = require('./middleware/auth');
 const { ownedBusiness, activeCategoryById, businessVerificationUpdate, businessImageColumn, getCheckoutFees, notify, audit } = require('./services/marketplace');
 const { businessSchema, serviceSchema, addressSchema, orderSchema, reviewSchema, supportSchema, categorySchema } = require('./validators/schemas');
@@ -363,7 +363,7 @@ function createApp(config = validateEnvironment()) {
       p_idempotency_key: body.idempotencyKey,
     });
     if (error) throw error;
-    res.status(201).json({ order: mapOrder(data) });
+    res.status(201).json({ order: mapCreatedOrder(data) });
   }));
   app.get('/api/orders/:id', authenticate, validateUuidParam(), asyncRoute(async (req, res) => {
     let query = req.supabase.from('orders').select('*,order_items(*),order_events(*),reviews(id),businesses(name,owner_id)');
@@ -687,5 +687,5 @@ function createApp(config = validateEnvironment()) {
 
 module.exports = {
   createApp, validateEnvironment, transitions, canTransition, canAccessOrder,
-  mapBusiness, mapOrder, businessSchema, orderSchema, HttpError, requireRole,
+  mapBusiness, mapOrder, mapCreatedOrder, businessSchema, orderSchema, HttpError, requireRole,
 };

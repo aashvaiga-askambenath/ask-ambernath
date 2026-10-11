@@ -72,6 +72,13 @@ function mapOrder(row) {
   };
 }
 
+function mapCreatedOrder(rows) {
+  if (!Array.isArray(rows) || rows.length !== 1 || !rows[0]?.id) {
+    throw new Error('Order creation did not return exactly one valid order');
+  }
+  return mapOrder(rows[0]);
+}
+
 function slugify(value) {
   return value.normalize('NFKD').toLowerCase().replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80);
@@ -86,6 +93,6 @@ function escapeXml(value) {
 }
 
 module.exports = {
-  adminRoles, transitions, canTransition, canAccessOrder, mapBusiness, mapOrder,
+  adminRoles, transitions, canTransition, canAccessOrder, mapBusiness, mapOrder, mapCreatedOrder,
   slugify, escapeFilter, escapeXml,
 };

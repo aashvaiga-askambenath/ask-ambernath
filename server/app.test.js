@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { businessSchema, canAccessOrder, canTransition, createApp, mapBusiness, mapOrder, orderSchema, requireRole, validateEnvironment } = require('./app');
+const { businessSchema, canAccessOrder, canTransition, createApp, mapBusiness, mapCreatedOrder, mapOrder, orderSchema, requireRole, validateEnvironment } = require('./app');
 const { activeCategoryById, businessVerificationUpdate, businessImageColumn, getCheckoutFees } = require('./services/marketplace');
 
 test('public business shape never reports ineligible businesses as online', () => {
@@ -168,6 +168,23 @@ test('order database rows are mapped without trusting client-shaped totals', () 
   });
   assert.equal(order.total, 100);
   assert.equal(order.items[0].unitPrice, 50);
+});
+
+test('created order RPC row arrays preserve the order ID in the API response', () => {
+  const order = mapCreatedOrder([{
+    id: 'e6177141-86a9-493c-9cb6-0887cc3cfa37',
+    order_number: 'AMB-123',
+    status: 'Pending',
+    subtotal: '100.00',
+    delivery_fee: '0',
+    platform_fee: '0',
+    discount: '0',
+    total: '100',
+  }]);
+  assert.equal(order.id, 'e6177141-86a9-493c-9cb6-0887cc3cfa37');
+  assert.equal(order.orderNumber, 'AMB-123');
+  assert.throws(() => mapCreatedOrder([]), /exactly one valid order/);
+  assert.throws(() => mapCreatedOrder([{ order_number: 'AMB-123' }]), /exactly one valid order/);
 });
 
 test('order transaction derives subtotal from current database service prices', () => {
