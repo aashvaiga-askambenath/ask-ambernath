@@ -29,7 +29,7 @@ The service-role key is used only in the Express process. Browser requests use t
    ```
 
 2. Copy `.env.example` to `.env` and fill in the Supabase Project URL, publishable/anon key, and server-only service-role key. Keep `.env` private.
-3. Apply the SQL migration in `supabase/migrations/202610090001_initial_marketplace.sql` using Supabase Dashboard → SQL Editor, or use the Supabase CLI from a linked project:
+3. Apply the SQL migrations in `supabase/migrations` in filename order using Supabase Dashboard → SQL Editor, or use the Supabase CLI from a linked project:
 
    ```sh
    npx supabase db push
@@ -47,7 +47,7 @@ The service-role key is used only in the Express process. Browser requests use t
 ## Supabase project setup
 
 1. Create a Supabase project and choose a strong database password. Do not put the database password or service-role key in source control.
-2. Apply the checked-in migration. It creates the normalized schema, indexes, RLS policies, two storage buckets, transaction functions, initial service categories, and zero-fee defaults. It does not create people, businesses, orders, or admin accounts. To use the Supabase CLI, initialize its local config once with `npx supabase init`, then run `npx supabase login`, `npx supabase link --project-ref YOUR_PROJECT_REF`, and `npx supabase db push` from the project root.
+2. Apply every checked-in migration in filename order. Together, they create the normalized schema, indexes, RLS policies, two storage buckets, transaction functions, initial service categories, the inside-shop-photo field, and zero-fee defaults. They do not create people, businesses, orders, or admin accounts. To use the Supabase CLI, initialize its local config once with `npx supabase init`, then run `npx supabase login`, `npx supabase link --project-ref YOUR_PROJECT_REF`, and `npx supabase db push` from the project root.
 3. In Authentication settings, configure the desired email provider and email verification policy. Set the Site URL and allowlisted redirect URLs for local development and the final HTTPS app domain. Password recovery returns to `/auth?mode=update-password`.
 4. The migration configures:
    - `business-media`: public read for approved marketplace imagery; owner uploads must be under that owner's business UUID.
@@ -104,13 +104,13 @@ npm run build
 npm start
 ```
 
-The API's health endpoint is `GET /api/health`. With a completed production build, Express serves the SPA and fingerprinted static assets. Browser auth and data features require a configured Supabase project.
+The API's health endpoint is `GET /api/health`. With a completed production build, Express serves the SPA and fingerprinted static assets. Browser auth and data features require a configured Supabase project. GitHub Actions runs lint, unit tests, production build, and startup smoke checks on pull requests and pushes to `main`; configure branch protection to require the **Quality checks / validate** status before merging.
 
 ## Legacy JSON data
 
 `data/db.json` was the old prototype store and contained only generated demo accounts and fictional sample businesses. It is removed and is not read by the app. Those demo users, password hashes, and businesses are deliberately not imported. Bcrypt hashes from the old app cannot be turned into Supabase Auth users by copying rows; a real-user migration would require a separately approved identity migration and verified email recovery. Do not import the former demo accounts into production.
 
-The initial migration inserts only category/configuration rows. There is no automatic production seed and no fake order, customer, business, or rating data.
+The initial migration inserts only category/configuration rows; the following migration adds the inside-shop-photo field. There is no automatic production seed and no fake order, customer, business, or rating data.
 
 ## Business listing publication
 
