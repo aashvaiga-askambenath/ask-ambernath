@@ -15,6 +15,22 @@ async function activeCategoryById(client, categoryId) {
   return data;
 }
 
+function businessVerificationUpdate(verificationStatus, approvalNotes) {
+  return {
+    verification_status: verificationStatus,
+    approval_notes: approvalNotes || null,
+    online: verificationStatus === 'verified',
+  };
+}
+
+function businessImageColumn(documentType) {
+  return {
+    logo: 'logo_url',
+    cover: 'cover_image_url',
+    shop_inside: 'shop_inside_image_url',
+  }[documentType] || null;
+}
+
 async function getCheckoutFees(client) {
   const { data, error } = await client.from('app_settings')
     .select('key,value').in('key', ['platform_fee', 'delivery_fee']);
@@ -43,4 +59,4 @@ async function audit(client, actorId, action, entityType, entityId, metadata) {
   if (error) throw error;
 }
 
-module.exports = { ownedBusiness, activeCategoryById, getCheckoutFees, notify, audit };
+module.exports = { ownedBusiness, activeCategoryById, businessVerificationUpdate, businessImageColumn, getCheckoutFees, notify, audit };

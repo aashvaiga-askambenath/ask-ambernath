@@ -10,7 +10,7 @@ const { z } = require('zod');
 const { HttpError, asyncRoute } = require('./lib/errors');
 const { adminRoles, transitions, canTransition, canAccessOrder, mapService, mapBusiness, mapOrder, slugify, escapeFilter, escapeXml } = require('./lib/domain');
 const { authenticate, optionalAuthenticate, requireRole, validateUuidParam } = require('./middleware/auth');
-const { ownedBusiness, activeCategoryById, getCheckoutFees, notify, audit } = require('./services/marketplace');
+const { ownedBusiness, activeCategoryById, businessVerificationUpdate, businessImageColumn, getCheckoutFees, notify, audit } = require('./services/marketplace');
 const { businessSchema, serviceSchema, addressSchema, orderSchema, reviewSchema, supportSchema, categorySchema } = require('./validators/schemas');
 
 function validateEnvironment() {
@@ -479,11 +479,9 @@ function createApp(config = validateEnvironment()) {
   }));
   app.patch('/api/admin/businesses/:id/verification', authenticate, requireRole(...adminRoles), validateUuidParam(), asyncRoute(async (req, res) => {
     const body = z.object({ verificationStatus: z.enum(['verified', 'rejected', 'suspended', 'pending']), approvalNotes: z.string().max(1000).optional() }).parse(req.body);
-    const { data, error } = await req.supabase.from('businesses').update({
-      verification_status: body.verificationStatus,
-      approval_notes: body.approvalNotes || null,
-      online: body.verificationStatus === 'verified' ? undefined : false,
-    }).eq('id', req.params.id).select('id,owner_id,name,verification_status,online').maybeSingle();
+    const { data, error } = await req.supabase.from('businesses')
+      .update(businessVerificationUpdate(body.verificationStatus, body.approvalNotes))
+      .eq('id', req.params.id).select('id,owner_id,name,verification_status,online').maybeSingle();
     if (error) throw error;
     if (!data) throw new HttpError(404, 'BUSINESS_NOT_FOUND', 'Business not found');
     await audit(req.supabase, req.user.id, `business_${body.verificationStatus}`, 'business', data.id, { note: body.approvalNotes });
@@ -608,7 +606,7 @@ function createApp(config = validateEnvironment()) {
       fileName: z.string().max(120),
       contentType: z.enum(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']),
       size: z.number().int().positive().max(10 * 1024 * 1024),
-      documentType: z.enum(['logo', 'cover', 'service', 'verification']).default('logo'),
+      documentType: z.enum(['logo', 'cover', 'shop_inside', 'service', 'verification']).default('logo'),
     }).parse(req.body);
     await ownedBusiness(req.supabase, req.params.id, req.user.id);
     if (body.documentType === 'verification' && body.contentType !== 'application/pdf') {
@@ -622,7 +620,7 @@ function createApp(config = validateEnvironment()) {
     let publicUrl = null;
     if (bucket === 'business-media') {
       publicUrl = req.supabase.storage.from(bucket).getPublicUrl(filePath).data.publicUrl;
-      const column = body.documentType === 'cover' ? 'cover_image_url' : body.documentType === 'logo' ? 'logo_url' : null;
+      const column = businessImageColumn(body.documentType);
       if (column) {
         const update = await req.supabase.from('businesses').update({ [column]: publicUrl }).eq('id', req.params.id);
         if (update.error) throw update.error;

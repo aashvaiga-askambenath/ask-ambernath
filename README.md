@@ -112,6 +112,12 @@ The API's health endpoint is `GET /api/health`. With a completed production buil
 
 The initial migration inserts only category/configuration rows. There is no automatic production seed and no fake order, customer, business, or rating data.
 
+## Business listing publication
+
+Business owners submit a listing from the owner account, then an administrator verifies it. Verification automatically publishes an active business so it appears in public search and the home page. Owners can take a published listing offline or republish a verified listing from the business dashboard. Listings that were verified before this publication behavior was introduced may need to be published once from that dashboard.
+
+The owner dashboard accepts an outside shop photo, an inside shop photo, and an Aadhaar verification PDF. Apply all SQL files in `supabase/migrations` in order (including `202610110001_business_inside_shop_photo.sql`) before deploying the inside-photo upload update. Shop photos appear on the public business profile; the Aadhaar PDF remains private.
+
 ## Render deployment
 
 1. Push the repository to the private/public Git host used by your team, with `.env` excluded.

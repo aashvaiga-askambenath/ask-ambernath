@@ -232,7 +232,6 @@ function BusinessDetail() {
   return <Shell>
     <Link className="back-btn" to="/explore"><ArrowLeft size={18}/> Explore</Link>
     <div className="detail-hero">
-      {business.coverImageUrl && <img className="cover-image" src={business.coverImageUrl} alt=""/>}
       <div className="detail-icon">{business.logoUrl ? <img src={business.logoUrl} alt={`${business.name} logo`}/> : <CategoryIcon category={business.category}/>}</div>
       <span className="online-badge"><BadgeCheck size={14}/> Verified · Open now</span>
       <h1>{business.name}</h1><p>{business.tagline}</p>
@@ -244,6 +243,10 @@ function BusinessDetail() {
         {user?.role === 'customer' && <button className="ghost-btn" onClick={toggleFavorite}><Heart size={15} fill={saved ? 'currentColor' : 'none'}/>{saved ? 'Saved' : 'Save'}</button>}
       </div>
     </div>
+    {(business.coverImageUrl || business.shopInsideImageUrl) && <section className="section shop-photo-grid" aria-label="Shop photos">
+      {business.coverImageUrl && <figure className="card shop-photo"><img src={business.coverImageUrl} alt={`${business.name} shop from outside`}/><figcaption>Outside the shop</figcaption></figure>}
+      {business.shopInsideImageUrl && <figure className="card shop-photo"><img src={business.shopInsideImageUrl} alt={`${business.name} shop interior`}/><figcaption>Inside the shop</figcaption></figure>}
+    </section>}
     {business.description && <section className="section card content-card"><h2>About</h2><p>{business.description}</p><p><MapPin size={15}/> {business.address}, {business.area}, {business.city} {business.pincode}</p></section>}
     <section className="section">
       <div className="section-head"><h2>Services</h2></div>
@@ -604,7 +607,9 @@ function BusinessPortal() {
       <EmptyState title="Set up your first business" text="Add your Ambernath listing to begin verification." action={<Link className="primary-btn" to="/list-business">List your business</Link>}/> :
       <>
         {businesses.data.businesses.length > 1 && <label className="business-select">Selected business<select value={businessId} onChange={(event) => setBusinessId(event.target.value)}>{businesses.data.businesses.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
-        {business && <><div className="card owner-business-card"><div><span className={`status status-${business.verificationStatus?.toLowerCase().replaceAll(' ', '-')}`}>{business.verificationStatus}</span><h2>{business.name}</h2><p>{business.tagline || business.area}</p></div><div className="online-control"><span>{business.online ? 'Online' : 'Offline'}</span><button disabled={business.verificationStatus !== 'verified'} className={`switch ${business.online ? 'is-on' : ''}`} role="switch" aria-checked={business.online} aria-label="Business online status" onClick={() => setOnline(!business.online)}><span/></button></div></div>
+        {business && <><div className="card owner-business-card"><div><span className={`status status-${business.verificationStatus?.toLowerCase().replaceAll(' ', '-')}`}>{business.verificationStatus}</span><h2>{business.name}</h2><p>{business.tagline || business.area}</p></div><div className="online-control"><span>{business.online ? 'Online' : 'Offline'}</span><button disabled={business.verificationStatus !== 'verified' || (!business.isActive && !business.online)} className={`switch ${business.online ? 'is-on' : ''}`} role="switch" aria-checked={business.online} aria-label="Business online status" onClick={() => setOnline(!business.online)}><span/></button></div></div>
+          {business.verificationStatus === 'verified' && !business.online && business.isActive && <div className="card publish-hint"><p>Your business is verified but not visible to customers yet. Publish it to appear in search and the home page.</p><button className="primary-btn" onClick={() => setOnline(true)}>Publish listing</button></div>}
+          {business.verificationStatus === 'verified' && !business.isActive && <p className="muted-note">This listing has been disabled and cannot be published. Please contact support.</p>}
           <BusinessUploads business={business}/>
           <div className="stats-grid"><Stat title="Orders received" value={myOrders.length}/><Stat title="Pending" value={myOrders.filter((item) => item.status === 'Pending').length}/><Stat title="Completed" value={myOrders.filter((item) => item.status === 'Completed').length}/><Stat title="Completed revenue" value={money(myOrders.filter((item) => item.status === 'Completed').reduce((sum, item) => sum + item.total, 0))}/></div>
           <section className="section"><div className="section-head"><h2>Services</h2></div><div className="service-list">{business.services.map((service) => <OwnerServiceEdit service={service} key={service.id} onSaved={() => setRefresh((value) => value + 1)}/>)}</div><NewOwnerService businessId={business.id} onSaved={() => setRefresh((value) => value + 1)}/></section>
@@ -682,7 +687,11 @@ function Admin() {
   const [filter, setFilter] = useState('');
   const toast = useToast();
   const moderation = async (business, verificationStatus) => {
-    try { await api.patch(`/admin/businesses/${business.id}/verification`, { verificationStatus }); setRefresh((value) => value + 1); toast(`Business ${verificationStatus}`); }
+    try {
+      await api.patch(`/admin/businesses/${business.id}/verification`, { verificationStatus });
+      setRefresh((value) => value + 1);
+      toast(verificationStatus === 'verified' ? 'Business verified and published' : `Business ${verificationStatus}`);
+    }
     catch (error) { toast(error.message, 'error'); }
   };
   const filtered = (businesses.data?.businesses || []).filter((item) => !filter || item.name.toLowerCase().includes(filter.toLowerCase()) || item.verificationStatus === filter);
@@ -806,11 +815,14 @@ function BusinessUploads({ business }) {
       toast(kind === 'verification' ? 'Verification document uploaded' : 'Business image uploaded');
     } catch (error) { toast(error.message, 'error'); } finally { setBusy(''); }
   };
-  return <div className="card upload-card"><h3>Business profile media</h3><p>Images are public. Verification documents are private and only shared with administrators.</p>
+  return <div className="card upload-card"><h3>Business profile photos and verification</h3>
+    <p><strong>Verification:</strong> Upload a clear photo or scan of your Aadhaar card saved as a PDF (up to 10 MB). For privacy, use a masked Aadhaar copy where possible. The PDF is private and accessible only to you and platform administrators.</p>
+    <p><strong>Shop photos:</strong> Upload one clear photo from outside and one from inside (JPG, PNG, or WebP, up to 5 MB each). Business profile photos are publicly visible.</p>
     <div className="upload-actions">
       <label className="upload-control">Upload logo<input type="file" accept="image/jpeg,image/png,image/webp" disabled={Boolean(busy)} onChange={(event) => upload('logo', event.target.files?.[0])}/></label>
-      <label className="upload-control">Upload cover<input type="file" accept="image/jpeg,image/png,image/webp" disabled={Boolean(busy)} onChange={(event) => upload('cover', event.target.files?.[0])}/></label>
-      <label className="upload-control">Verification PDF<input type="file" accept="application/pdf" disabled={Boolean(busy)} onChange={(event) => upload('verification', event.target.files?.[0])}/></label>
+      <label className="upload-control">Upload outside shop photo<input type="file" accept="image/jpeg,image/png,image/webp" disabled={Boolean(busy)} onChange={(event) => upload('cover', event.target.files?.[0])}/></label>
+      <label className="upload-control">Upload inside shop photo<input type="file" accept="image/jpeg,image/png,image/webp" disabled={Boolean(busy)} onChange={(event) => upload('shop_inside', event.target.files?.[0])}/></label>
+      <label className="upload-control">Upload Aadhaar PDF<input type="file" accept="application/pdf" disabled={Boolean(busy)} onChange={(event) => upload('verification', event.target.files?.[0])}/></label>
     </div>{busy && <p role="status">Uploading {busy}…</p>}
   </div>;
 }

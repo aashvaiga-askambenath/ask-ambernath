@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { businessSchema, canAccessOrder, canTransition, createApp, mapBusiness, mapOrder, orderSchema, requireRole, validateEnvironment } = require('./app');
-const { activeCategoryById, getCheckoutFees } = require('./services/marketplace');
+const { activeCategoryById, businessVerificationUpdate, businessImageColumn, getCheckoutFees } = require('./services/marketplace');
 
 test('public business shape never reports ineligible businesses as online', () => {
   const business = mapBusiness({
@@ -21,6 +21,22 @@ test('public business shape never reports ineligible businesses as online', () =
   assert.equal(business.online, false);
   assert.equal(business.priceFrom, 40);
   assert.deepEqual(business.services.map((service) => service.id), ['available']);
+});
+
+test('business profiles expose outside and inside shop photos', () => {
+  const business = mapBusiness({
+    cover_image_url: 'https://images.example/shop-outside.jpg',
+    shop_inside_image_url: 'https://images.example/shop-inside.jpg',
+  });
+  assert.equal(business.coverImageUrl, 'https://images.example/shop-outside.jpg');
+  assert.equal(business.shopInsideImageUrl, 'https://images.example/shop-inside.jpg');
+});
+
+test('shop image uploads are saved to their own business profile columns', () => {
+  assert.equal(businessImageColumn('cover'), 'cover_image_url');
+  assert.equal(businessImageColumn('shop_inside'), 'shop_inside_image_url');
+  assert.equal(businessImageColumn('logo'), 'logo_url');
+  assert.equal(businessImageColumn('service'), null);
 });
 
 test('business eligibility requires verified, active and explicitly online', () => {
@@ -61,6 +77,24 @@ test('business onboarding looks up the selected active category by its UUID', as
 
   assert.deepEqual(await activeCategoryById(client, expectedId), { id: expectedId });
   assert.deepEqual(filters, [['id', expectedId], ['is_active', true]]);
+});
+
+test('verifying a business publishes it and other verification outcomes keep it offline', () => {
+  assert.deepEqual(businessVerificationUpdate('verified'), {
+    verification_status: 'verified',
+    approval_notes: null,
+    online: true,
+  });
+  assert.deepEqual(businessVerificationUpdate('rejected', 'Missing documents'), {
+    verification_status: 'rejected',
+    approval_notes: 'Missing documents',
+    online: false,
+  });
+  assert.deepEqual(businessVerificationUpdate('pending', ''), {
+    verification_status: 'pending',
+    approval_notes: null,
+    online: false,
+  });
 });
 
 test('checkout fee settings expose the database-configured fees accurately', async () => {

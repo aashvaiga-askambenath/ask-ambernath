@@ -112,8 +112,11 @@ button:disabled {
 .ask-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .ask-footer > span { color: var(--muted); font-size: 11px; }
 .detail-hero { position: relative; overflow: hidden; }
-.detail-hero .cover-image { width: calc(100% + 48px); height: 180px; max-width: none; object-fit: cover; margin: -24px -24px 18px; }
 .detail-hero .detail-icon { position: relative; }
+.shop-photo-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.shop-photo { min-width: 0; margin: 0; overflow: hidden; }
+.shop-photo img { display: block; width: 100%; height: 190px; object-fit: cover; }
+.shop-photo figcaption { padding: 10px 13px; font-size: 12px; font-weight: 800; }
 .online-badge { display: inline-flex !important; align-items: center; gap: 4px; }
 .detail-actions,
 .action-row,
@@ -219,6 +222,8 @@ button:disabled {
 .owner-business-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 17px; }
 .owner-business-card h2 { margin: 8px 0 4px; font-size: 19px; }
 .owner-business-card p { margin: 0; color: var(--muted); }
+.publish-hint { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 17px; margin-top: 10px; }
+.publish-hint p { margin: 0; color: var(--muted); font-size: 13px; }
 .online-control { display: flex; align-items: center; gap: 9px; font-size: 12px; font-weight: 800; }
 .switch { width: 47px; height: 27px; padding: 3px; border-radius: 99px; background: #cfc9d9; transition: background .15s ease; }
 .switch span { display: block; width: 21px; height: 21px; border-radius: 50%; background: #fff; transition: transform .15s ease; }
@@ -284,7 +289,8 @@ button:disabled {
   .admin-row .action-row { justify-content: flex-start; }
   .hours-row { grid-template-columns: 1fr 1fr; }
   .hours-row > b { grid-column: 1 / -1; }
-  .detail-hero .cover-image { height: 135px; }
+  .shop-photo-grid { grid-template-columns: 1fr; }
+  .shop-photo img { height: 180px; }
   .detail-actions .ghost-btn { padding: 8px 10px; }
   .toast { left: 12px; right: 12px; bottom: calc(75px + env(safe-area-inset-bottom)); max-width: none; }
 }

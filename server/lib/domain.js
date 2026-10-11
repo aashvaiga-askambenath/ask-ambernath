@@ -43,6 +43,7 @@ function mapBusiness(row, includeUnavailable = false) {
     email: row.email, category: row.categories?.name || '', categoryId: row.categories?.slug || '',
     area: row.area, address: row.address_line, city: row.city, pincode: row.pincode, tagline: row.tagline,
     description: row.description, logoUrl: row.logo_url, coverImageUrl: row.cover_image_url,
+    shopInsideImageUrl: row.shop_inside_image_url,
     priceFrom: services.length ? Math.min(...services.map((service) => service.price)) : 0,
     services, hours: row.business_hours || [],
     reviews: (row.reviews || []).filter((review) => review.is_visible !== false),
