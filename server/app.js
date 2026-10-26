@@ -55,11 +55,33 @@ function validateEnvironment() {
   };
 }
 
+async function deleteStorageFolder(client, bucket, prefix) {
+  const storage = client.storage.from(bucket);
+  while (true) {
+    const { data, error } = await storage.list(prefix, { limit: 100, offset: 0 });
+    if (error) throw error;
+    if (!Array.isArray(data)) throw new Error(`Unable to list files in ${bucket}/${prefix}`);
+    const entries = data;
+    if (!entries.length) return;
+
+    const files = entries.filter((entry) => entry.id);
+    if (files.length) {
+      const { error: removeError } = await storage.remove(files.map((file) => `${prefix}/${file.name}`));
+      if (removeError) throw removeError;
+      continue;
+    }
+
+    const folder = entries.find((entry) => !entry.id);
+    if (!folder) return;
+    await deleteStorageFolder(client, bucket, `${prefix}/${folder.name}`);
+  }
+}
+
 function createApp(config = validateEnvironment()) {
   const app = express();
-  const supabase = config.databaseConfigured
+  const supabase = config.supabaseClient || (config.databaseConfigured
     ? createClient(config.supabaseUrl, config.supabaseServiceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } })
-    : null;
+    : null);
 
   app.disable('x-powered-by');
   app.set('trust proxy', config.environment === 'production' ? 1 : false);
@@ -110,6 +132,41 @@ function createApp(config = validateEnvironment()) {
     serviceCity: 'Ambernath',
   }));
   app.get('/api/auth/me', authenticate, (req, res) => res.json({ user: req.user }));
+  app.delete('/api/user/delete-account', authenticate, requireRole('customer', 'business_owner'), asyncRoute(async (req, res) => {
+    z.object({ confirmation: z.literal('DELETE') }).strict().parse(req.body);
+
+    const { data: businesses, error: prepareError } = await req.supabase.rpc('prepare_account_deletion', {
+      p_user_id: req.user.id,
+    });
+    if (prepareError?.message?.includes('ACCOUNT_HAS_OPEN_BUSINESS_ORDERS')) {
+      throw new HttpError(
+        409,
+        'ACCOUNT_HAS_OPEN_BUSINESS_ORDERS',
+        'Complete, reject, or cancel active orders and resolve pending payment processing before deleting your account.',
+      );
+    }
+    if (prepareError) throw prepareError;
+
+    const preparedBusinesses = z.array(z.object({ business_id: z.string().uuid() })).parse(businesses);
+    const businessIds = preparedBusinesses.map((business) => business.business_id);
+    for (const businessId of businessIds) {
+      await deleteStorageFolder(req.supabase, 'business-media', businessId);
+      await deleteStorageFolder(req.supabase, 'verification-documents', businessId);
+    }
+
+    if (businessIds.length) {
+      const { error: documentsError } = await req.supabase.from('business_documents')
+        .delete().in('business_id', businessIds);
+      if (documentsError) throw documentsError;
+      const { error: favoritesError } = await req.supabase.from('favorites')
+        .delete().in('business_id', businessIds);
+      if (favoritesError) throw favoritesError;
+    }
+
+    const { error: deleteError } = await req.supabase.auth.admin.deleteUser(req.user.id);
+    if (deleteError) throw deleteError;
+    res.status(204).end();
+  }));
   app.patch('/api/profile', authenticate, asyncRoute(async (req, res) => {
     const body = z.object({
       fullName: z.string().trim().min(2).max(100).optional(),
@@ -687,5 +744,5 @@ function createApp(config = validateEnvironment()) {
 
 module.exports = {
   createApp, validateEnvironment, transitions, canTransition, canAccessOrder,
-  mapBusiness, mapOrder, mapCreatedOrder, businessSchema, orderSchema, HttpError, requireRole,
+  mapBusiness, mapOrder, mapCreatedOrder, businessSchema, orderSchema, HttpError, requireRole, deleteStorageFolder,
 };

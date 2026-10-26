@@ -161,6 +161,193 @@ test('role guard rejects a customer from admin routes', () => {
   assert.equal(receivedError.code, 'FORBIDDEN');
 });
 
+test('account deletion uses the authenticated identity and requires the exact confirmation', async () => {
+  const calls = { prepare: [], deleteUser: [] };
+  const client = {
+    auth: {
+      getUser: async (token) => ({
+        data: { user: token === 'valid-token' ? { id: 'authenticated-user-id', email: 'user@example.com' } : null },
+        error: token === 'valid-token' ? null : new Error('invalid token'),
+      }),
+      admin: {
+        deleteUser: async (userId) => {
+          calls.deleteUser.push(userId);
+          return { error: null };
+        },
+      },
+    },
+    from: (table) => {
+      assert.equal(table, 'profiles');
+      const query = {
+        select: () => query,
+        eq: (column, value) => {
+          assert.equal(column, 'id');
+          assert.equal(value, 'authenticated-user-id');
+          return query;
+        },
+        maybeSingle: async () => ({
+          data: { id: 'authenticated-user-id', full_name: 'Account holder', phone: null, role: 'customer', is_active: true, avatar_url: null },
+          error: null,
+        }),
+      };
+      return query;
+    },
+    rpc: async (name, params) => {
+      calls.prepare.push({ name, params });
+      return { data: [], error: null };
+    },
+  };
+  const app = createApp({ environment: 'test', clientOrigins: [], databaseConfigured: true, supabaseClient: client });
+  const server = app.listen(0, '127.0.0.1');
+  try {
+    await new Promise((resolve) => server.once('listening', resolve));
+    const endpoint = `http://127.0.0.1:${server.address().port}/api/user/delete-account`;
+    const unauthenticated = await fetch(endpoint, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmation: 'DELETE' }),
+    });
+    assert.equal(unauthenticated.status, 401);
+
+    const unexpectedId = await fetch(endpoint, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer valid-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmation: 'DELETE', userId: 'someone-else' }),
+    });
+    assert.equal(unexpectedId.status, 400);
+    assert.deepEqual(calls.prepare, []);
+
+    const deleted = await fetch(endpoint, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer valid-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmation: 'DELETE' }),
+    });
+    assert.equal(deleted.status, 204);
+    assert.deepEqual(calls.prepare, [{
+      name: 'prepare_account_deletion',
+      params: { p_user_id: 'authenticated-user-id' },
+    }]);
+    assert.deepEqual(calls.deleteUser, ['authenticated-user-id']);
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test('account deletion blocks owners with pending orders before deleting auth credentials', async () => {
+  const calls = { deleteUser: [] };
+  const client = {
+    auth: {
+      getUser: async (token) => ({
+        data: { user: token === 'valid-token' ? { id: 'owner-id' } : null },
+        error: token === 'valid-token' ? null : new Error('invalid token'),
+      }),
+      admin: {
+        deleteUser: async (userId) => {
+          calls.deleteUser.push(userId);
+          return { error: null };
+        },
+      },
+    },
+    from: () => {
+      const query = {
+        select: () => query,
+        eq: () => query,
+        maybeSingle: async () => ({
+          data: { id: 'owner-id', full_name: 'Business owner', phone: null, role: 'business_owner', is_active: true, avatar_url: null },
+          error: null,
+        }),
+      };
+      return query;
+    },
+    rpc: async () => ({ data: null, error: { message: 'ACCOUNT_HAS_OPEN_BUSINESS_ORDERS' } }),
+  };
+  const app = createApp({ environment: 'test', clientOrigins: [], databaseConfigured: true, supabaseClient: client });
+  const server = app.listen(0, '127.0.0.1');
+  try {
+    await new Promise((resolve) => server.once('listening', resolve));
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/user/delete-account`, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer valid-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmation: 'DELETE' }),
+    });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).error.code, 'ACCOUNT_HAS_OPEN_BUSINESS_ORDERS');
+    assert.deepEqual(calls.deleteUser, []);
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test('account deletion takes a business owner offline and removes owned storage before deleting credentials', async () => {
+  const businessId = '57fbd44c-7e22-4dc1-b9ce-a9854872d124';
+  const calls = { storage: [], cleanup: [], deleteUser: [] };
+  const client = {
+    auth: {
+      getUser: async (token) => ({
+        data: { user: token === 'valid-token' ? { id: 'owner-id' } : null },
+        error: token === 'valid-token' ? null : new Error('invalid token'),
+      }),
+      admin: {
+        deleteUser: async (userId) => {
+          calls.deleteUser.push(userId);
+          return { error: null };
+        },
+      },
+    },
+    storage: {
+      from: (bucket) => ({
+        list: async (prefix) => {
+          calls.storage.push({ bucket, prefix });
+          return { data: [], error: null };
+        },
+      }),
+    },
+    from: (table) => {
+      const query = {
+        select: () => query,
+        eq: () => query,
+        maybeSingle: async () => ({
+          data: { id: 'owner-id', full_name: 'Business owner', phone: null, role: 'business_owner', is_active: true, avatar_url: null },
+          error: null,
+        }),
+        delete: () => query,
+        in: async (column, values) => {
+          calls.cleanup.push({ table, column, values });
+          return { error: null };
+        },
+      };
+      return query;
+    },
+    rpc: async (name, params) => {
+      assert.equal(name, 'prepare_account_deletion');
+      assert.deepEqual(params, { p_user_id: 'owner-id' });
+      return { data: [{ business_id: businessId }], error: null };
+    },
+  };
+  const app = createApp({ environment: 'test', clientOrigins: [], databaseConfigured: true, supabaseClient: client });
+  const server = app.listen(0, '127.0.0.1');
+  try {
+    await new Promise((resolve) => server.once('listening', resolve));
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/user/delete-account`, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer valid-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmation: 'DELETE' }),
+    });
+    assert.equal(response.status, 204, await response.text());
+    assert.deepEqual(calls.storage, [
+      { bucket: 'business-media', prefix: businessId },
+      { bucket: 'verification-documents', prefix: businessId },
+    ]);
+    assert.deepEqual(calls.cleanup, [
+      { table: 'business_documents', column: 'business_id', values: [businessId] },
+      { table: 'favorites', column: 'business_id', values: [businessId] },
+    ]);
+    assert.deepEqual(calls.deleteUser, ['owner-id']);
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test('order access checks customer and business ownership before a status mutation', () => {
   const order = { customer_id: 'customer-id', businesses: { owner_id: 'owner-id' } };
   assert.equal(canAccessOrder('customer', 'customer-id', order), true);
@@ -207,6 +394,19 @@ test('order transaction derives subtotal from current database service prices', 
   assert.match(migration, /subtotal_amount := subtotal_amount \+ service_row\.price \* item_record\.quantity/);
   assert.match(migration, /insert into public\.order_items[\s\S]+?service_row\.price, item_record\.quantity, service_row\.price \* item_record\.quantity/);
   assert.doesNotMatch(migration.match(/create or replace function public\.create_order\([\s\S]*?\)\s*returns setof public\.orders/)[0], /p_(?:subtotal|total|unit_price)/i);
+});
+
+test('account deletion migration cascades customer data and detaches archived businesses', () => {
+  const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '202610240001_account_deletion.sql'), 'utf8');
+  assert.match(migration, /businesses_owner_id_fkey[\s\S]+?on delete set null/i);
+  assert.match(migration, /orders_customer_id_fkey[\s\S]+?on delete cascade/i);
+  assert.match(migration, /reviews_order_id_fkey[\s\S]+?on delete cascade/i);
+  assert.match(migration, /reviews_customer_id_fkey[\s\S]+?on delete cascade/i);
+  assert.match(migration, /orders\.status not in \('Completed', 'Rejected', 'Cancelled'\)/);
+  assert.match(migration, /orders\.payment_status = 'pending'/);
+  assert.match(migration, /set is_active = false, online = false/);
+  assert.match(migration, /message = '\[Message removed after account deletion\]'/);
+  assert.match(migration, /revoke all on function public\.prepare_account_deletion\(uuid\) from public, anon, authenticated/i);
 });
 
 test('production startup refuses missing privileged Supabase configuration', () => {

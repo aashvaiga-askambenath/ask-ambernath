@@ -75,6 +75,16 @@ export function AuthProvider({ children }) {
       setUser((current) => ({ ...current, ...result.user }));
       return result.user;
     },
+    deleteAccount: async (confirmation) => {
+      await api.delete('/user/delete-account', { confirmation });
+      let signOutError = null;
+      if (supabase) {
+        const { error } = await supabase.auth.signOut({ scope: 'local' });
+        signOutError = error?.message || null;
+      }
+      setUser(null);
+      return { signOutError };
+    },
     logout: async () => {
       if (supabase) {
         const { error } = await supabase.auth.signOut();

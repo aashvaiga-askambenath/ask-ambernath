@@ -1,6 +1,6 @@
 create extension if not exists pgcrypto;
 
-create table public.profiles (
+create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   full_name text not null default '',
   phone text,
@@ -11,7 +11,7 @@ create table public.profiles (
   updated_at timestamptz not null default now()
 );
 
-create table public.categories (
+create table if not exists public.categories (
   id uuid primary key default gen_random_uuid(),
   name text not null unique,
   slug text not null unique,
@@ -23,7 +23,7 @@ create table public.categories (
   updated_at timestamptz not null default now()
 );
 
-create table public.businesses (
+create table if not exists public.businesses (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid not null references public.profiles(id) on delete restrict,
   category_id uuid not null references public.categories(id) on delete restrict,
@@ -53,7 +53,7 @@ create table public.businesses (
   updated_at timestamptz not null default now()
 );
 
-create table public.business_services (
+create table if not exists public.business_services (
   id uuid primary key default gen_random_uuid(),
   business_id uuid not null references public.businesses(id) on delete cascade,
   name text not null,
@@ -69,7 +69,7 @@ create table public.business_services (
   updated_at timestamptz not null default now()
 );
 
-create table public.business_hours (
+create table if not exists public.business_hours (
   id uuid primary key default gen_random_uuid(),
   business_id uuid not null references public.businesses(id) on delete cascade,
   day_of_week smallint not null check (day_of_week between 0 and 6),
@@ -80,7 +80,7 @@ create table public.business_hours (
   check (is_closed or (open_time is not null and close_time is not null))
 );
 
-create table public.business_documents (
+create table if not exists public.business_documents (
   id uuid primary key default gen_random_uuid(),
   business_id uuid not null references public.businesses(id) on delete cascade,
   document_type text not null,
@@ -92,7 +92,7 @@ create table public.business_documents (
   updated_at timestamptz not null default now()
 );
 
-create table public.customer_addresses (
+create table if not exists public.customer_addresses (
   id uuid primary key default gen_random_uuid(),
   customer_id uuid not null references public.profiles(id) on delete cascade,
   label text not null,
@@ -111,7 +111,7 @@ create table public.customer_addresses (
   updated_at timestamptz not null default now()
 );
 
-create table public.orders (
+create table if not exists public.orders (
   id uuid primary key default gen_random_uuid(),
   order_number text not null unique,
   idempotency_key uuid not null,
@@ -135,7 +135,7 @@ create table public.orders (
   unique (customer_id, idempotency_key)
 );
 
-create table public.order_items (
+create table if not exists public.order_items (
   id uuid primary key default gen_random_uuid(),
   order_id uuid not null references public.orders(id) on delete cascade,
   service_id uuid references public.business_services(id) on delete set null,
@@ -146,7 +146,7 @@ create table public.order_items (
   created_at timestamptz not null default now()
 );
 
-create table public.order_events (
+create table if not exists public.order_events (
   id uuid primary key default gen_random_uuid(),
   order_id uuid not null references public.orders(id) on delete cascade,
   actor_id uuid references public.profiles(id) on delete set null,
@@ -156,14 +156,14 @@ create table public.order_events (
   created_at timestamptz not null default now()
 );
 
-create table public.favorites (
+create table if not exists public.favorites (
   customer_id uuid not null references public.profiles(id) on delete cascade,
   business_id uuid not null references public.businesses(id) on delete cascade,
   created_at timestamptz not null default now(),
   primary key (customer_id, business_id)
 );
 
-create table public.reviews (
+create table if not exists public.reviews (
   id uuid primary key default gen_random_uuid(),
   order_id uuid not null unique references public.orders(id) on delete restrict,
   customer_id uuid not null references public.profiles(id) on delete restrict,
@@ -175,7 +175,7 @@ create table public.reviews (
   updated_at timestamptz not null default now()
 );
 
-create table public.notifications (
+create table if not exists public.notifications (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
   type text not null,
@@ -186,7 +186,7 @@ create table public.notifications (
   created_at timestamptz not null default now()
 );
 
-create table public.admin_activity (
+create table if not exists public.admin_activity (
   id uuid primary key default gen_random_uuid(),
   actor_id uuid references public.profiles(id) on delete set null,
   action text not null,
@@ -196,7 +196,7 @@ create table public.admin_activity (
   created_at timestamptz not null default now()
 );
 
-create table public.support_requests (
+create table if not exists public.support_requests (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references public.profiles(id) on delete set null,
   name text not null,
@@ -210,27 +210,27 @@ create table public.support_requests (
   updated_at timestamptz not null default now()
 );
 
-create table public.app_settings (
+create table if not exists public.app_settings (
   key text primary key,
   value jsonb not null,
   updated_at timestamptz not null default now()
 );
 
-create index businesses_public_search_idx on public.businesses (verification_status, is_active, online, category_id, area);
-create index businesses_owner_created_idx on public.businesses (owner_id, created_at desc);
-create index businesses_slug_idx on public.businesses (slug);
-create index business_services_business_availability_idx on public.business_services (business_id, is_available, sort_order);
-create index business_documents_business_status_idx on public.business_documents (business_id, verification_status);
-create index customer_addresses_owner_created_idx on public.customer_addresses (customer_id, is_default desc, created_at desc);
-create index orders_customer_created_idx on public.orders (customer_id, created_at desc);
-create index orders_business_status_created_idx on public.orders (business_id, status, created_at desc);
-create index order_items_order_idx on public.order_items (order_id);
-create index order_events_order_created_idx on public.order_events (order_id, created_at);
-create index favorites_business_idx on public.favorites (business_id);
-create index reviews_business_visible_idx on public.reviews (business_id, is_visible, created_at desc);
-create index notifications_user_created_idx on public.notifications (user_id, created_at desc);
-create index admin_activity_created_idx on public.admin_activity (created_at desc);
-create index support_requests_status_created_idx on public.support_requests (status, created_at desc);
+create index if not exists businesses_public_search_idx on public.businesses (verification_status, is_active, online, category_id, area);
+create index if not exists businesses_owner_created_idx on public.businesses (owner_id, created_at desc);
+create index if not exists businesses_slug_idx on public.businesses (slug);
+create index if not exists business_services_business_availability_idx on public.business_services (business_id, is_available, sort_order);
+create index if not exists business_documents_business_status_idx on public.business_documents (business_id, verification_status);
+create index if not exists customer_addresses_owner_created_idx on public.customer_addresses (customer_id, is_default desc, created_at desc);
+create index if not exists orders_customer_created_idx on public.orders (customer_id, created_at desc);
+create index if not exists orders_business_status_created_idx on public.orders (business_id, status, created_at desc);
+create index if not exists order_items_order_idx on public.order_items (order_id);
+create index if not exists order_events_order_created_idx on public.order_events (order_id, created_at);
+create index if not exists favorites_business_idx on public.favorites (business_id);
+create index if not exists reviews_business_visible_idx on public.reviews (business_id, is_visible, created_at desc);
+create index if not exists notifications_user_created_idx on public.notifications (user_id, created_at desc);
+create index if not exists admin_activity_created_idx on public.admin_activity (created_at desc);
+create index if not exists support_requests_status_created_idx on public.support_requests (status, created_at desc);
 
 insert into public.categories (name, slug, icon_key, sort_order) values
   ('Water Supply', 'water', 'droplets', 1),
@@ -262,16 +262,28 @@ begin
 end;
 $$;
 
+drop trigger if exists profiles_updated_at on public.profiles;
 create trigger profiles_updated_at before update on public.profiles for each row execute function public.set_updated_at();
+drop trigger if exists categories_updated_at on public.categories;
 create trigger categories_updated_at before update on public.categories for each row execute function public.set_updated_at();
+drop trigger if exists businesses_updated_at on public.businesses;
 create trigger businesses_updated_at before update on public.businesses for each row execute function public.set_updated_at();
+drop trigger if exists business_services_updated_at on public.business_services;
 create trigger business_services_updated_at before update on public.business_services for each row execute function public.set_updated_at();
+drop trigger if exists business_documents_updated_at on public.business_documents;
 create trigger business_documents_updated_at before update on public.business_documents for each row execute function public.set_updated_at();
+drop trigger if exists customer_addresses_updated_at on public.customer_addresses;
 create trigger customer_addresses_updated_at before update on public.customer_addresses for each row execute function public.set_updated_at();
+drop trigger if exists orders_updated_at on public.orders;
 create trigger orders_updated_at before update on public.orders for each row execute function public.set_updated_at();
+drop trigger if exists reviews_updated_at on public.reviews;
 create trigger reviews_updated_at before update on public.reviews for each row execute function public.set_updated_at();
+drop trigger if exists support_requests_updated_at on public.support_requests;
 create trigger support_requests_updated_at before update on public.support_requests for each row execute function public.set_updated_at();
+drop trigger if exists app_settings_updated_at on public.app_settings;
 create trigger app_settings_updated_at before update on public.app_settings for each row execute function public.set_updated_at();
+
+drop trigger if exists on_auth_user_created on auth.users;
 
 create or replace function public.handle_new_auth_user()
 returns trigger language plpgsql security definer set search_path = public
@@ -315,6 +327,7 @@ begin
 end;
 $$;
 
+drop trigger if exists reviews_refresh_business_rating on public.reviews;
 create trigger reviews_refresh_business_rating
 after insert or update or delete on public.reviews
 for each row execute function public.refresh_business_rating();
@@ -504,6 +517,42 @@ alter table public.notifications enable row level security;
 alter table public.admin_activity enable row level security;
 alter table public.support_requests enable row level security;
 alter table public.app_settings enable row level security;
+
+drop policy if exists "profiles_select_self_or_admin" on public.profiles;
+drop policy if exists "profiles_update_self_or_admin" on public.profiles;
+drop policy if exists "categories_public_active" on public.categories;
+drop policy if exists "categories_admin_all" on public.categories;
+drop policy if exists "businesses_public_eligible" on public.businesses;
+drop policy if exists "businesses_owner_read" on public.businesses;
+drop policy if exists "businesses_admin_all" on public.businesses;
+drop policy if exists "services_public_available" on public.business_services;
+drop policy if exists "services_owner_read" on public.business_services;
+drop policy if exists "services_admin_all" on public.business_services;
+drop policy if exists "hours_public_eligible" on public.business_hours;
+drop policy if exists "hours_owner_read" on public.business_hours;
+drop policy if exists "hours_admin_all" on public.business_hours;
+drop policy if exists "documents_owner_read" on public.business_documents;
+drop policy if exists "documents_admin_read" on public.business_documents;
+drop policy if exists "addresses_owner_all" on public.customer_addresses;
+drop policy if exists "orders_customer_or_business_read" on public.orders;
+drop policy if exists "order_items_related_read" on public.order_items;
+drop policy if exists "order_events_related_read" on public.order_events;
+drop policy if exists "favorites_owner_all" on public.favorites;
+drop policy if exists "reviews_public_visible" on public.reviews;
+drop policy if exists "reviews_customer_read" on public.reviews;
+drop policy if exists "reviews_admin_all" on public.reviews;
+drop policy if exists "notifications_owner_all" on public.notifications;
+drop policy if exists "notifications_admin_insert" on public.notifications;
+drop policy if exists "admin_activity_admin_read" on public.admin_activity;
+drop policy if exists "admin_activity_admin_insert" on public.admin_activity;
+drop policy if exists "support_request_user_read" on public.support_requests;
+drop policy if exists "support_request_admin_all" on public.support_requests;
+drop policy if exists "app_settings_admin_all" on public.app_settings;
+drop policy if exists "business_media_public_read" on storage.objects;
+drop policy if exists "business_media_owner_upload" on storage.objects;
+drop policy if exists "business_media_owner_update" on storage.objects;
+drop policy if exists "verification_owner_upload" on storage.objects;
+drop policy if exists "verification_owner_or_admin_read" on storage.objects;
 
 create policy "profiles_select_self_or_admin" on public.profiles for select to authenticated
 using (id = auth.uid() or public.is_platform_admin());

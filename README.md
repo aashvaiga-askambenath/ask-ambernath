@@ -137,6 +137,7 @@ The checked-in Blueprint selects Render's free web-service plan for preview/test
 
 - Supabase Auth sessions are managed by the official client; no custom JWT secret or hand-written persistent token store exists.
 - Protected API requests validate the live Supabase user, then enforce the current profile role and active status server-side.
+- Customers and business owners can open **Account → Password & account security** to change their password or delete their account after typing `DELETE`. Deletion requires the `202610240001_account_deletion.sql` migration and the server-only `SUPABASE_SERVICE_ROLE_KEY`. Customer profile, credentials, saved data, orders, and reviews are removed. Business-owner deletion archives listings offline and removes business media/documents, but is blocked while any order is active or payment processing is pending. Historical business order records are retained.
 - Public listing queries require active, verified, online businesses. Owners cannot set verification state or publish an unverified listing.
 - The order creation RPC locks and rechecks the eligible business and available service records, validates each quantity, calculates totals from database prices/settings, snapshots line items/address, creates the status event, and notifies the owner in one transaction. The request idempotency key is unique per customer.
 - The order transition RPC rechecks the actor, ownership, current status, and legal next status while holding an order row lock.

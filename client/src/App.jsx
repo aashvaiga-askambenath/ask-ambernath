@@ -1,7 +1,7 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft, BadgeCheck, Bell, ChevronRight, Clock3, Droplets, Heart, Home, MapPin, Package,
-  Phone, Plus, Search, Share2, ShieldCheck, SlidersHorizontal, Store, User, Wrench, X,
+  Phone, Plus, Search, Share2, ShieldCheck, SlidersHorizontal, Store, Trash2, User, Wrench, X,
 } from 'lucide-react';
 import {
   Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams,
@@ -9,6 +9,7 @@ import {
 import { api, supabase } from './api';
 import { useAuth } from './AuthContext';
 import { orderActionLabel } from './orderActions.mjs';
+import './account.css';
 
 const ToastContext = createContext(() => {});
 const roleNames = { customer: 'Customer', business_owner: 'Business owner', admin: 'Administrator', super_admin: 'Super admin' };
@@ -467,7 +468,7 @@ function Account() {
   if (!user) return <Shell><PageHead title="Your account" text="Sign in to see your orders and saved businesses."/><Link className="primary-btn" to="/auth">Sign in / Sign up</Link></Shell>;
   const signOut = async () => { setBusy(true); try { await logout(); } catch (error) { toast(error.message, 'error'); } finally { setBusy(false); } };
   const links = [
-    ['/account/profile', 'Profile and contact', User], ['/account/password', 'Password and sign-in', ShieldCheck],
+    ['/account/profile', 'Profile and contact', User], ['/account/security', 'Password & account security', ShieldCheck],
     ['/orders', 'Orders and bookings', Package], ['/account/addresses', 'Saved addresses', MapPin],
     ['/account/favorites', 'Saved businesses', Heart], ['/account/notifications', 'Notifications', Bell],
     ...(user.role === 'business_owner' ? [['/business', 'Business dashboard', Store]] : []),
@@ -480,6 +481,61 @@ function Account() {
     </div>
     <div className="legal-links"><Link to="/terms">Terms</Link><Link to="/privacy">Privacy</Link><Link to="/cancellation">Cancellation policy</Link></div>
   </Shell>;
+}
+
+function DeleteAccountDialog({ onClose, onDelete, onDeleted }) {
+  const dialogRef = useRef(null);
+  const [confirmation, setConfirmation] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (dialog && !dialog.open) dialog.showModal();
+  }, []);
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      const result = await onDelete(confirmation);
+      onDeleted(result.signOutError);
+    } catch (deleteError) {
+      setError(deleteError.message);
+      setBusy(false);
+    }
+  };
+
+  return <dialog
+    className="delete-account-dialog"
+    ref={dialogRef}
+    aria-labelledby="delete-account-title"
+    aria-describedby="delete-account-warning"
+    onCancel={(event) => { event.preventDefault(); if (!busy) onClose(); }}
+  >
+    <form onSubmit={submit}>
+      <h2 id="delete-account-title">Delete your account?</h2>
+      <p id="delete-account-warning">This action is irreversible. Your profile, sign-in credentials, saved items, and customer order/review data will be deleted. Any business listing will be taken offline, and historical order records may remain.</p>
+      <p>Business-owner accounts cannot be deleted while active orders or payment processing are pending. Resolve them first or contact support.</p>
+      <label htmlFor="delete-account-confirmation">Type DELETE to confirm</label>
+      <input
+        id="delete-account-confirmation"
+        autoFocus
+        autoComplete="off"
+        value={confirmation}
+        onChange={(event) => setConfirmation(event.target.value)}
+        required
+      />
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <div className="delete-account-actions">
+        <button type="button" className="ghost-btn" disabled={busy} onClick={onClose}>Cancel</button>
+        <button type="submit" className="danger-btn" disabled={busy || confirmation !== 'DELETE'}>
+          {busy ? 'Deleting…' : 'Permanently delete'}
+        </button>
+      </div>
+    </form>
+  </dialog>;
 }
 
 function AddressBook() {
@@ -516,15 +572,44 @@ function ProfileSettings() {
 }
 
 function PasswordSettings() {
-  const { updatePassword } = useAuth();
+  const { user, updatePassword, deleteAccount } = useAuth();
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const navigate = useNavigate();
   const toast = useToast();
   const save = async (event) => {
     event.preventDefault(); setBusy(true);
     try { await updatePassword(password); setPassword(''); toast('Password updated'); } catch (error) { toast(error.message, 'error'); } finally { setBusy(false); }
   };
-  return <Shell><PageHead title="Password and sign-in" text="Change the password for your Ask Ambernath account."/><form className="card auth-form" onSubmit={save}><label>New password<input type="password" required minLength={8} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)}/></label><button className="primary-btn" disabled={busy}>{busy ? 'Updating…' : 'Update password'}</button></form></Shell>;
+  return <Shell>
+    <PageHead title="Password & account security" text="Update your password or permanently delete your account."/>
+    <section className="security-section">
+      <h2>Change password</h2>
+      <p>Choose a new password with at least 8 characters.</p>
+      <form className="card auth-form" onSubmit={save}>
+        <label>New password<input type="password" required minLength={8} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)}/></label>
+        <button className="primary-btn" disabled={busy}>{busy ? 'Updating…' : 'Update password'}</button>
+      </form>
+    </section>
+    {['customer', 'business_owner'].includes(user?.role) && <section className="delete-account-section" aria-labelledby="delete-account-section-title">
+      <div>
+        <span className="delete-account-eyebrow">PERMANENT ACTION</span>
+        <h2 id="delete-account-section-title">Delete account</h2>
+        <p>This permanently deletes your sign-in and personal account data. Business-owner listings will be taken offline; historical order records may be retained.</p>
+      </div>
+      <button className="danger-btn" onClick={() => setDeleteDialogOpen(true)}><Trash2 size={17}/> Delete account</button>
+    </section>}
+    {deleteDialogOpen && <DeleteAccountDialog
+      onClose={() => setDeleteDialogOpen(false)}
+      onDelete={deleteAccount}
+      onDeleted={(signOutError) => {
+        setDeleteDialogOpen(false);
+        navigate('/', { replace: true });
+        toast(signOutError ? `Account deleted, but local sign-out needs attention: ${signOutError}` : 'Your account has been deleted.', signOutError ? 'error' : 'success');
+      }}
+    />}
+  </Shell>;
 }
 
 function Favorites() {
@@ -899,7 +984,7 @@ export default function App() {
     <Route path="/" element={<HomePage/>}/><Route path="/explore" element={<Explore/>}/><Route path="/ask" element={<Ask/>}/>
     <Route path="/business/:slug" element={<BusinessDetail/>}/><Route path="/checkout" element={<Require roles={['customer']}><Checkout/></Require>}/>
     <Route path="/orders" element={<Require><Orders/></Require>}/><Route path="/orders/:id" element={<Require><OrderDetail/></Require>}/>
-    <Route path="/account" element={<Account/>}/><Route path="/account/profile" element={<Require><ProfileSettings/></Require>}/><Route path="/account/password" element={<Require><PasswordSettings/></Require>}/><Route path="/account/addresses" element={<Require roles={['customer']}><AddressBook/></Require>}/>
+    <Route path="/account" element={<Account/>}/><Route path="/account/profile" element={<Require><ProfileSettings/></Require>}/><Route path="/account/security" element={<Require><PasswordSettings/></Require>}/><Route path="/account/password" element={<Require><PasswordSettings/></Require>}/><Route path="/account/addresses" element={<Require roles={['customer']}><AddressBook/></Require>}/>
     <Route path="/account/favorites" element={<Require roles={['customer']}><Favorites/></Require>}/><Route path="/account/notifications" element={<Require><Notifications/></Require>}/>
     <Route path="/auth" element={<AuthPage/>}/><Route path="/list-business" element={<Require roles={['business_owner']}><ListBusiness/></Require>}/>
     <Route path="/business" element={<Require roles={['business_owner']}><BusinessPortal/></Require>}/><Route path="/admin" element={<Require roles={['admin','super_admin']}><Admin/></Require>}/>
