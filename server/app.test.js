@@ -54,6 +54,85 @@ test('shop image uploads are saved to their own business profile columns', () =>
   assert.equal(businessImageColumn('service'), null);
 });
 
+test('service photo uploads require an owned service and save its public image URL', async () => {
+  const businessId = '57fbd44c-7e22-4dc1-b9ce-a9854872d124';
+  const serviceId = '20c14d44-ea2f-4d87-a046-535ab6ff16c8';
+  const otherServiceId = 'e6177141-86a9-493c-9cb6-0887cc3cfa37';
+  const calls = { imageUpdates: [], signedUploads: [] };
+  const client = {
+    auth: {
+      getUser: async () => ({ data: { user: { id: 'owner-id' } }, error: null }),
+    },
+    from(table) {
+      const filters = [];
+      const query = {
+        select: () => query,
+        eq: (column, value) => { filters.push([column, value]); return query; },
+        maybeSingle: async () => {
+          if (table === 'profiles') return { data: { id: 'owner-id', role: 'business_owner', is_active: true }, error: null };
+          if (table === 'businesses') return { data: { id: businessId }, error: null };
+          if (table === 'business_services') {
+            const matches = filters.some(([column, value]) => column === 'id' && value === serviceId) &&
+              filters.some(([column, value]) => column === 'business_id' && value === businessId);
+            return { data: matches ? { id: serviceId } : null, error: null };
+          }
+          throw new Error(`Unexpected table: ${table}`);
+        },
+        update: (values) => {
+          calls.imageUpdates.push({ table, values, filters });
+          return query;
+        },
+        then(resolve, reject) {
+          return Promise.resolve({ error: null }).then(resolve, reject);
+        },
+      };
+      return query;
+    },
+    storage: {
+      from: (bucket) => ({
+        createSignedUploadUrl: async (filePath) => {
+          calls.signedUploads.push({ bucket, filePath });
+          return { data: { token: 'upload-token', signedUrl: 'https://storage.example/upload' }, error: null };
+        },
+        getPublicUrl: (filePath) => ({ data: { publicUrl: `https://storage.example/${filePath}` } }),
+      }),
+    },
+  };
+  const app = createApp({ environment: 'test', clientOrigins: [], databaseConfigured: true, supabaseClient: client });
+  const server = app.listen(0, '127.0.0.1');
+  try {
+    await new Promise((resolve) => server.once('listening', resolve));
+    const endpoint = `http://127.0.0.1:${server.address().port}/api/owner/businesses/${businessId}/upload`;
+    const upload = (id) => fetch(endpoint, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer valid-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName: 'service.jpg',
+        contentType: 'image/jpeg',
+        size: 1024,
+        documentType: 'service',
+        serviceId: id,
+      }),
+    });
+
+    const uploaded = await upload(serviceId);
+    assert.equal(uploaded.status, 201);
+    const result = await uploaded.json();
+    assert.equal(result.bucket, 'business-media');
+    assert.ok(result.path.startsWith(`${businessId}/`));
+    assert.equal(calls.imageUpdates[0].table, 'business_services');
+    assert.equal(calls.imageUpdates[0].values.image_url, result.publicUrl);
+
+    const missing = await upload(otherServiceId);
+    assert.equal(missing.status, 404);
+    assert.equal((await missing.json()).error.code, 'SERVICE_NOT_FOUND');
+    assert.equal(calls.signedUploads.length, 1);
+    assert.equal(calls.imageUpdates.length, 1);
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test('business eligibility requires verified, active and explicitly online', () => {
   for (const fields of [
     { is_active: false, verification_status: 'verified', online: true },

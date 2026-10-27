@@ -664,10 +664,28 @@ function createApp(config = validateEnvironment()) {
       contentType: z.enum(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']),
       size: z.number().int().positive().max(10 * 1024 * 1024),
       documentType: z.enum(['logo', 'cover', 'shop_inside', 'service', 'verification']).default('logo'),
+      serviceId: z.string().uuid().optional(),
     }).parse(req.body);
-    await ownedBusiness(req.supabase, req.params.id, req.user.id);
+    const business = await ownedBusiness(req.supabase, req.params.id, req.user.id);
     if (body.documentType === 'verification' && body.contentType !== 'application/pdf') {
       throw new HttpError(400, 'INVALID_FILE_TYPE', 'Verification documents must be PDF files');
+    }
+    if (body.documentType !== 'verification' && body.contentType === 'application/pdf') {
+      throw new HttpError(400, 'INVALID_FILE_TYPE', 'Business images must be JPG, PNG, or WebP files');
+    }
+    if (body.documentType !== 'verification' && body.size > 5 * 1024 * 1024) {
+      throw new HttpError(400, 'FILE_TOO_LARGE', 'Business images must be 5 MB or smaller');
+    }
+    if (body.documentType === 'service' && !body.serviceId) {
+      throw new HttpError(400, 'SERVICE_REQUIRED', 'Choose the service this photo belongs to');
+    }
+    let service;
+    if (body.documentType === 'service') {
+      const { data, error } = await req.supabase.from('business_services')
+        .select('id').eq('id', body.serviceId).eq('business_id', business.id).maybeSingle();
+      if (error) throw error;
+      if (!data) throw new HttpError(404, 'SERVICE_NOT_FOUND', 'Service not found for this business');
+      service = data;
     }
     const extension = ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'application/pdf': 'pdf' })[body.contentType];
     const bucket = body.documentType === 'verification' ? 'verification-documents' : 'business-media';
@@ -680,6 +698,11 @@ function createApp(config = validateEnvironment()) {
       const column = businessImageColumn(body.documentType);
       if (column) {
         const update = await req.supabase.from('businesses').update({ [column]: publicUrl }).eq('id', req.params.id);
+        if (update.error) throw update.error;
+      }
+      if (service) {
+        const update = await req.supabase.from('business_services').update({ image_url: publicUrl })
+          .eq('id', service.id).eq('business_id', business.id);
         if (update.error) throw update.error;
       }
     }
