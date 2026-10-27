@@ -108,3 +108,39 @@
   gap: 9px;
   margin-top: 18px;
 }
+
+.service-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.service-image {
+  flex: none;
+  width: 76px;
+  height: 64px;
+  border-radius: 12px;
+  object-fit: cover;
+  background: #f0ecff;
+}
+
+.service-photo-control {
+  display: block;
+  width: fit-content;
+  margin: 5px 0 0;
+  color: var(--purple);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.service-photo-control input {
+  display: none;
+}
+
+@media (max-width: 560px) {
+  .service-image {
+    width: 60px;
+    height: 56px;
+  }
+}

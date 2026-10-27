@@ -253,7 +253,7 @@ function BusinessDetail() {
     <section className="section">
       <div className="section-head"><h2>Services</h2></div>
       {business.services.length ? <div className="service-list">{business.services.map((service) =>
-        <div key={service.id} className="service-row"><div><b>{service.name}</b><small>{service.description || service.unitLabel || 'Available from this business'}</small></div>
+        <div key={service.id} className="service-row"><div className="service-info">{service.imageUrl && <img className="service-image" src={service.imageUrl} alt={`${service.name} service`}/>}<div><b>{service.name}</b><small>{service.description || service.unitLabel || 'Available from this business'}</small></div></div>
           <div className="service-price">{money(service.price)}<Link className="small-order" to={`/checkout?business=${business.id}&service=${service.id}`}>Add to order</Link></div></div>)}</div> :
         <EmptyState title="Services not listed yet" text="Contact the business directly to ask about availability."/>}
     </section>
@@ -698,7 +698,7 @@ function BusinessPortal() {
           {business.verificationStatus === 'verified' && !business.isActive && <p className="muted-note">This listing has been disabled and cannot be published. Please contact support.</p>}
           <BusinessUploads business={business}/>
           <div className="stats-grid"><Stat title="Orders received" value={myOrders.length}/><Stat title="Pending" value={myOrders.filter((item) => item.status === 'Pending').length}/><Stat title="Completed" value={myOrders.filter((item) => item.status === 'Completed').length}/><Stat title="Completed revenue" value={money(myOrders.filter((item) => item.status === 'Completed').reduce((sum, item) => sum + item.total, 0))}/></div>
-          <section className="section"><div className="section-head"><h2>Services</h2></div><div className="service-list">{business.services.map((service) => <OwnerServiceEdit service={service} key={service.id} onSaved={() => setRefresh((value) => value + 1)}/>)}</div><NewOwnerService businessId={business.id} onSaved={() => setRefresh((value) => value + 1)}/></section>
+          <section className="section"><div className="section-head"><h2>Services</h2></div><div className="service-list">{business.services.map((service) => <OwnerServiceEdit businessId={business.id} service={service} key={service.id} onSaved={() => setRefresh((value) => value + 1)}/>)}</div><NewOwnerService businessId={business.id} onSaved={() => setRefresh((value) => value + 1)}/></section>
           <BusinessHoursEditor business={business} onSaved={() => setRefresh((value) => value + 1)}/>
           <section className="section"><div className="section-head"><h2>Incoming orders</h2><Link to="/orders">View all</Link></div>{orders.loading ? <Loading/> : orders.error ? <ErrorState message={orders.error}/> : myOrders.length ? <div className="order-list">{myOrders.slice(0, 10).map((order) => <OrderCard key={order.id} order={order}/>)}</div> : <EmptyState title="No incoming orders" text="New customer bookings will appear here."/>}</section>
         </>}
@@ -708,12 +708,21 @@ function BusinessPortal() {
 
 function Stat({ title, value }) { return <div className="card stat-card"><span>{title}</span><b>{value}</b></div>; }
 
-function OwnerServiceEdit({ service, onSaved }) {
+function OwnerServiceEdit({ businessId, service, onSaved }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(service.name);
   const [price, setPrice] = useState(service.price);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
+  const upload = async (file) => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      await uploadServiceImage(businessId, service.id, file);
+      onSaved();
+      toast('Service photo uploaded');
+    } catch (error) { toast(error.message, 'error'); } finally { setBusy(false); }
+  };
   const save = async (event) => {
     event.preventDefault(); setBusy(true);
     try { await api.patch(`/owner/services/${service.id}`, { name, price: Number(price) }); onSaved(); setOpen(false); toast('Service updated'); }
@@ -724,22 +733,47 @@ function OwnerServiceEdit({ service, onSaved }) {
     try { await api.patch(`/owner/services/${service.id}`, { isAvailable: !service.isAvailable }); onSaved(); }
     catch (error) { toast(error.message, 'error'); } finally { setBusy(false); }
   };
-  return <div className="owner-service"><div className="service-row"><div><b>{service.name}</b><small>{service.isAvailable ? 'Available' : 'Paused'}</small></div><div className="service-price">{money(service.price)}<button className="small-order text-button" disabled={busy} onClick={toggle}>{service.isAvailable ? 'Pause' : 'Make available'}</button><button className="small-order text-button" onClick={() => setOpen(!open)}>{open ? 'Close edit' : 'Edit price'}</button></div></div>
+  return <div className="owner-service"><div className="service-row"><div className="service-info">{service.imageUrl && <img className="service-image" src={service.imageUrl} alt={`${service.name} service`}/>}<div><b>{service.name}</b><small>{service.isAvailable ? 'Available' : 'Paused'}</small><label className="service-photo-control">{service.imageUrl ? 'Change photo' : 'Add service photo'}<input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={(event) => { upload(event.target.files?.[0]); event.target.value = ''; }}/></label></div></div><div className="service-price">{money(service.price)}<button className="small-order text-button" disabled={busy} onClick={toggle}>{service.isAvailable ? 'Pause' : 'Make available'}</button><button className="small-order text-button" disabled={busy} onClick={() => setOpen(!open)}>{open ? 'Close edit' : 'Edit price'}</button></div></div>
     {open && <form className="inline-form service-inline" onSubmit={save}><label>Service name<input required value={name} onChange={(event) => setName(event.target.value)}/></label><label>Price in ₹<input required type="number" min="0" max="1000000" value={price} onChange={(event) => setPrice(event.target.value)}/></label><button className="primary-btn" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button></form>}
   </div>;
+}
+
+async function uploadServiceImage(businessId, serviceId, file) {
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) {
+    throw new Error('Choose a JPG, PNG, or WebP image under 5 MB.');
+  }
+  if (!supabase) throw new Error('Supabase storage is not configured yet.');
+  const details = await api.post(`/owner/businesses/${businessId}/upload`, {
+    fileName: file.name, contentType: file.type, size: file.size, documentType: 'service', serviceId,
+  });
+  const { error } = await supabase.storage.from(details.bucket)
+    .uploadToSignedUrl(details.path, details.token, file, { contentType: file.type });
+  if (error) throw error;
 }
 
 function NewOwnerService({ businessId, onSaved }) {
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
+  const [photo, setPhoto] = useState(null);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
   const create = async (event) => {
     event.preventDefault(); setBusy(true);
-    try { await api.post(`/owner/businesses/${businessId}/services`, { name, price: Number(price) }); setName(''); setPrice(''); onSaved(); toast('Service added'); }
+    try {
+      const result = await api.post(`/owner/businesses/${businessId}/services`, { name, price: Number(price) });
+      setName(''); setPrice('');
+      if (photo) {
+        try {
+          await uploadServiceImage(businessId, result.service.id, photo);
+        } catch (error) {
+          setPhoto(null); onSaved(); toast(`Service added, but its photo could not be uploaded: ${error.message}`, 'error'); return;
+        }
+      }
+      setPhoto(null); onSaved(); toast('Service added');
+    }
     catch (error) { toast(error.message, 'error'); } finally { setBusy(false); }
   };
-  return <form className="card inline-form" onSubmit={create}><label>Add service<input required minLength={2} value={name} onChange={(event) => setName(event.target.value)}/></label><label>Price in ₹<input type="number" required min="0" max="1000000" value={price} onChange={(event) => setPrice(event.target.value)}/></label><button className="primary-btn" disabled={busy}>{busy ? 'Adding…' : 'Add service'}</button></form>;
+  return <form className="card inline-form" onSubmit={create}><label>Add service<input required minLength={2} value={name} onChange={(event) => setName(event.target.value)}/></label><label>Price in ₹<input type="number" required min="0" max="1000000" value={price} onChange={(event) => setPrice(event.target.value)}/></label><label>Service photo (optional)<input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={(event) => setPhoto(event.target.files?.[0] || null)}/></label><button className="primary-btn" disabled={busy}>{busy ? 'Adding…' : 'Add service'}</button></form>;
 }
 
 function BusinessHoursEditor({ business, onSaved }) {
