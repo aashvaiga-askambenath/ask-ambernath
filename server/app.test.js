@@ -4,6 +4,126 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { businessSchema, canAccessOrder, canTransition, createApp, mapBusiness, mapCreatedOrder, mapOrder, orderSchema, requireRole, validateEnvironment } = require('./app');
 const { activeCategoryById, businessVerificationUpdate, businessImageColumn, getCheckoutFees } = require('./services/marketplace');
+const { createPublicCache } = require('./lib/publicCache');
+
+test('public response cache reuses only GET responses and can be cleared', () => {
+  const cache = createPublicCache();
+  const request = { method: 'GET', originalUrl: '/api/categories?sort=name' };
+  const response = () => ({
+    statusCode: 200,
+    headers: {},
+    set(name, value) { this.headers[name] = value; },
+    json(body) { this.body = body; },
+  });
+
+  let nextCalls = 0;
+  const firstResponse = response();
+  cache.middleware(request, firstResponse, () => { nextCalls += 1; });
+  firstResponse.json({ categories: ['Water'] });
+  assert.equal(firstResponse.headers['Cache-Control'], 'public, max-age=0, s-maxage=30, stale-while-revalidate=30');
+
+  const cachedResponse = response();
+  cache.middleware(request, cachedResponse, () => { nextCalls += 1; });
+  assert.equal(nextCalls, 1);
+  assert.deepEqual(cachedResponse.body, { categories: ['Water'] });
+  assert.equal(cachedResponse.headers['Cache-Control'], 'public, max-age=0, s-maxage=30, stale-while-revalidate=30');
+
+  cache.clear();
+  cache.middleware(request, response(), () => { nextCalls += 1; });
+  assert.equal(nextCalls, 2);
+});
+
+test('public response cache does not store errors or non-GET responses', () => {
+  const cache = createPublicCache();
+  const response = () => ({
+    statusCode: 200,
+    headers: {},
+    set(name, value) { this.headers[name] = value; },
+    json(body) { this.body = body; },
+  });
+  let nextCalls = 0;
+
+  const failedResponse = response();
+  failedResponse.statusCode = 500;
+  cache.middleware({ method: 'GET', originalUrl: '/api/businesses' }, failedResponse, () => { nextCalls += 1; });
+  failedResponse.json({ error: 'failed' });
+  assert.equal(failedResponse.headers['Cache-Control'], undefined);
+
+  cache.middleware({ method: 'GET', originalUrl: '/api/businesses' }, response(), () => { nextCalls += 1; });
+  cache.middleware({ method: 'POST', originalUrl: '/api/businesses' }, response(), () => { nextCalls += 1; });
+  assert.equal(nextCalls, 3);
+});
+
+test('public response cache does not restore an in-flight response after invalidation', () => {
+  const cache = createPublicCache();
+  const response = () => ({
+    statusCode: 200,
+    set() {},
+    json(body) { this.body = body; },
+  });
+  const request = { method: 'GET', originalUrl: '/api/categories' };
+  const pendingResponse = response();
+  let nextCalls = 0;
+
+  cache.middleware(request, pendingResponse, () => { nextCalls += 1; });
+  cache.clear();
+  pendingResponse.json({ categories: ['stale'] });
+  cache.middleware(request, response(), () => { nextCalls += 1; });
+  assert.equal(nextCalls, 2);
+});
+
+test('successful API writes invalidate cached public routes', async () => {
+  let categoryReads = 0;
+  let failSupportInsert = false;
+  const client = {
+    from(table) {
+      const query = {
+        select: () => query,
+        eq: () => query,
+        order: async () => {
+          categoryReads += 1;
+          return { data: [{ id: 'category' }], error: null };
+        },
+        insert: async () => ({ error: failSupportInsert ? new Error('insert failed') : null }),
+      };
+      assert.ok(['categories', 'support_requests'].includes(table));
+      return query;
+    },
+  };
+  const app = createApp({ environment: 'test', clientOrigins: [], databaseConfigured: true, supabaseClient: client });
+  const server = app.listen(0, '127.0.0.1');
+  try {
+    await new Promise((resolve) => server.once('listening', resolve));
+    const baseUrl = `http://127.0.0.1:${server.address().port}`;
+    const readCategories = () => fetch(`${baseUrl}/api/categories`);
+    const submitSupport = () => fetch(`${baseUrl}/api/support`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Local resident',
+        phone: '9876543210',
+        subject: 'Service question',
+        message: 'Please share details about local service availability.',
+      }),
+    });
+
+    assert.equal((await readCategories()).status, 200);
+    assert.equal((await readCategories()).status, 200);
+    assert.equal(categoryReads, 1);
+
+    failSupportInsert = true;
+    assert.equal((await submitSupport()).status, 500);
+    await readCategories();
+    assert.equal(categoryReads, 1);
+
+    failSupportInsert = false;
+    assert.equal((await submitSupport()).status, 201);
+    await readCategories();
+    assert.equal(categoryReads, 2);
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
 
 test('order action buttons use clear imperative labels without changing status values', async () => {
   const { orderActionLabel } = await import('../client/src/orderActions.mjs');
@@ -38,6 +158,19 @@ test('public business shape never reports ineligible businesses as online', () =
   assert.deepEqual(business.services.map((service) => service.id), ['available']);
 });
 
+test('business service images are included in mapped service details', () => {
+  const business = mapBusiness({
+    business_services: [{
+      id: 'service-id',
+      name: 'Electrical repair',
+      price: '250',
+      image_url: 'https://images.example/electrical-repair.jpg',
+      is_available: true,
+    }],
+  });
+  assert.equal(business.services[0].imageUrl, 'https://images.example/electrical-repair.jpg');
+});
+
 test('business profiles expose outside and inside shop photos', () => {
   const business = mapBusiness({
     cover_image_url: 'https://images.example/shop-outside.jpg',
@@ -52,6 +185,87 @@ test('shop image uploads are saved to their own business profile columns', () =>
   assert.equal(businessImageColumn('shop_inside'), 'shop_inside_image_url');
   assert.equal(businessImageColumn('logo'), 'logo_url');
   assert.equal(businessImageColumn('service'), null);
+});
+
+test('service photo uploads require an owned service and save its public image URL', async () => {
+  const businessId = '57fbd44c-7e22-4dc1-b9ce-a9854872d124';
+  const serviceId = '20c14d44-ea2f-4d87-a046-535ab6ff16c8';
+  const otherServiceId = 'e6177141-86a9-493c-9cb6-0887cc3cfa37';
+  const calls = { imageUpdates: [], signedUploads: [] };
+  const client = {
+    auth: {
+      getUser: async () => ({ data: { user: { id: 'owner-id' } }, error: null }),
+    },
+    from(table) {
+      const filters = [];
+      const query = {
+        select: () => query,
+        eq: (column, value) => { filters.push([column, value]); return query; },
+        maybeSingle: async () => {
+          if (table === 'profiles') return { data: { id: 'owner-id', role: 'business_owner', is_active: true }, error: null };
+          if (table === 'businesses') {
+            return { data: { id: businessId }, error: null };
+          }
+          if (table === 'business_services') {
+            const matches = filters.some(([column, value]) => column === 'id' && value === serviceId) &&
+              filters.some(([column, value]) => column === 'business_id' && value === businessId);
+            return { data: matches ? { id: serviceId } : null, error: null };
+          }
+          throw new Error(`Unexpected table: ${table}`);
+        },
+        update: (values) => {
+          calls.imageUpdates.push({ table, values, filters });
+          return query;
+        },
+        then(resolve, reject) {
+          return Promise.resolve({ error: null }).then(resolve, reject);
+        },
+      };
+      return query;
+    },
+    storage: {
+      from: (bucket) => ({
+        createSignedUploadUrl: async (filePath) => {
+          calls.signedUploads.push({ bucket, filePath });
+          return { data: { token: 'upload-token', signedUrl: 'https://storage.example/upload' }, error: null };
+        },
+        getPublicUrl: (filePath) => ({ data: { publicUrl: `https://storage.example/${filePath}` } }),
+      }),
+    },
+  };
+  const app = createApp({ environment: 'test', clientOrigins: [], databaseConfigured: true, supabaseClient: client });
+  const server = app.listen(0, '127.0.0.1');
+  try {
+    await new Promise((resolve) => server.once('listening', resolve));
+    const endpoint = `http://127.0.0.1:${server.address().port}/api/owner/businesses/${businessId}/upload`;
+    const upload = (id) => fetch(endpoint, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer valid-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName: 'service.jpg',
+        contentType: 'image/jpeg',
+        size: 1024,
+        documentType: 'service',
+        serviceId: id,
+      }),
+    });
+
+    const uploaded = await upload(serviceId);
+    assert.equal(uploaded.status, 201);
+    const result = await uploaded.json();
+    assert.equal(result.bucket, 'business-media');
+    assert.ok(result.path.startsWith(`${businessId}/`));
+    assert.equal(calls.imageUpdates[0].table, 'business_services');
+    assert.equal(calls.imageUpdates[0].values.image_url, result.publicUrl);
+
+    const missing = await upload(otherServiceId);
+    assert.equal(missing.status, 404);
+    assert.equal((await missing.json()).error.code, 'SERVICE_NOT_FOUND');
+    assert.equal(calls.signedUploads.length, 1);
+    assert.equal(calls.imageUpdates.length, 1);
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
 });
 
 test('business eligibility requires verified, active and explicitly online', () => {

@@ -14,9 +14,9 @@ export default class ErrorBoundary extends Component {
     if (!this.state.failed) return this.props.children;
     return <main className="page error-boundary" role="alert">
       <div className="card">
-        <h1>We hit a problem</h1>
-        <p>The page could not be displayed. Reload to try again.</p>
-        <button className="primary-btn" onClick={() => window.location.reload()}>Reload Ask Ambernath</button>
+        <h1>This page needs another moment.</h1>
+        <p>Something interrupted the page from loading. Refresh to give it another try.</p>
+        <button className="primary-btn" onClick={() => window.location.reload()}>Refresh the page</button>
       </div>
     </main>;
   }

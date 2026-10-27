@@ -8,6 +8,7 @@ const rateLimit = require('express-rate-limit');
 const { createClient } = require('@supabase/supabase-js');
 const { z } = require('zod');
 const { HttpError, asyncRoute } = require('./lib/errors');
+const { createPublicCache } = require('./lib/publicCache');
 const { adminRoles, transitions, canTransition, canAccessOrder, mapService, mapBusiness, mapOrder, mapCreatedOrder, slugify, escapeFilter, escapeXml } = require('./lib/domain');
 const { authenticate, optionalAuthenticate, requireRole, validateUuidParam } = require('./middleware/auth');
 const { ownedBusiness, activeCategoryById, businessVerificationUpdate, businessImageColumn, getCheckoutFees, notify, audit } = require('./services/marketplace');
@@ -79,6 +80,7 @@ async function deleteStorageFolder(client, bucket, prefix) {
 
 function createApp(config = validateEnvironment()) {
   const app = express();
+  const publicCache = createPublicCache();
   const supabase = config.supabaseClient || (config.databaseConfigured
     ? createClient(config.supabaseUrl, config.supabaseServiceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } })
     : null);
@@ -122,6 +124,14 @@ function createApp(config = validateEnvironment()) {
   app.use('/api', (req, _res, next) => {
     if (!supabase) return next(new HttpError(503, 'DATABASE_NOT_CONFIGURED', 'Marketplace services are not configured yet'));
     req.supabase = supabase;
+    next();
+  });
+  app.use('/api', (req, res, next) => {
+    if (req.method !== 'GET') {
+      res.once('finish', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) publicCache.clear();
+      });
+    }
     next();
   });
 
@@ -179,7 +189,7 @@ function createApp(config = validateEnvironment()) {
     if (error) throw error;
     res.json({ user: { id: data.id, name: data.full_name, phone: data.phone, role: data.role, email: req.user.email } });
   }));
-  app.get('/api/categories', asyncRoute(async (req, res) => {
+  app.get('/api/categories', publicCache.middleware, asyncRoute(async (req, res) => {
     const { data, error } = await req.supabase.from('categories').select('id,name,slug,icon_key,description,sort_order').eq('is_active', true).order('sort_order');
     if (error) throw error;
     res.json({ categories: data });
@@ -188,7 +198,7 @@ function createApp(config = validateEnvironment()) {
     res.json(await getCheckoutFees(req.supabase));
   }));
 
-  app.get('/api/businesses', asyncRoute(async (req, res) => {
+  app.get('/api/businesses', publicCache.middleware, asyncRoute(async (req, res) => {
     const filters = z.object({
       q: z.string().max(120).optional(),
       category: z.string().max(80).optional(),
@@ -227,7 +237,7 @@ function createApp(config = validateEnvironment()) {
     res.json({ businesses, total: count || businesses.length, offset: filters.offset, limit: filters.limit });
   }));
 
-  app.get('/api/businesses/:slug', asyncRoute(async (req, res) => {
+  app.get('/api/businesses/:slug', publicCache.middleware, asyncRoute(async (req, res) => {
     const { data, error } = await req.supabase.from('businesses')
       .select('*,categories!inner(name,slug,icon_key,is_active),business_services(*),business_hours(*),reviews(id,rating,comment,created_at,profiles(full_name))')
       .eq('slug', req.params.slug).eq('is_active', true).eq('verification_status', 'verified').eq('online', true).eq('categories.is_active', true).maybeSingle();
@@ -664,10 +674,28 @@ function createApp(config = validateEnvironment()) {
       contentType: z.enum(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']),
       size: z.number().int().positive().max(10 * 1024 * 1024),
       documentType: z.enum(['logo', 'cover', 'shop_inside', 'service', 'verification']).default('logo'),
+      serviceId: z.string().uuid().optional(),
     }).parse(req.body);
-    await ownedBusiness(req.supabase, req.params.id, req.user.id);
+    const business = await ownedBusiness(req.supabase, req.params.id, req.user.id);
     if (body.documentType === 'verification' && body.contentType !== 'application/pdf') {
       throw new HttpError(400, 'INVALID_FILE_TYPE', 'Verification documents must be PDF files');
+    }
+    if (body.documentType !== 'verification' && body.contentType === 'application/pdf') {
+      throw new HttpError(400, 'INVALID_FILE_TYPE', 'Business images must be JPG, PNG, or WebP files');
+    }
+    if (body.documentType !== 'verification' && body.size > 5 * 1024 * 1024) {
+      throw new HttpError(400, 'FILE_TOO_LARGE', 'Business images must be 5 MB or smaller');
+    }
+    if (body.documentType === 'service' && !body.serviceId) {
+      throw new HttpError(400, 'SERVICE_REQUIRED', 'Choose the service this photo belongs to');
+    }
+    let service;
+    if (body.documentType === 'service') {
+      const { data, error } = await req.supabase.from('business_services')
+        .select('id').eq('id', body.serviceId).eq('business_id', business.id).maybeSingle();
+      if (error) throw error;
+      if (!data) throw new HttpError(404, 'SERVICE_NOT_FOUND', 'Service not found for this business');
+      service = data;
     }
     const extension = ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'application/pdf': 'pdf' })[body.contentType];
     const bucket = body.documentType === 'verification' ? 'verification-documents' : 'business-media';
@@ -680,6 +708,11 @@ function createApp(config = validateEnvironment()) {
       const column = businessImageColumn(body.documentType);
       if (column) {
         const update = await req.supabase.from('businesses').update({ [column]: publicUrl }).eq('id', req.params.id);
+        if (update.error) throw update.error;
+      }
+      if (service) {
+        const update = await req.supabase.from('business_services').update({ image_url: publicUrl })
+          .eq('id', service.id).eq('business_id', business.id);
         if (update.error) throw update.error;
       }
     }
