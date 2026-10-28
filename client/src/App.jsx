@@ -42,9 +42,9 @@ function useLoad(url, refresh = 0) {
   return state;
 }
 
-function Shell({ children, pageClass = '' }) {
+function Shell({ children, pageClass = '', shellClass = '' }) {
   const { user } = useAuth();
-  return <div className="app-wrap">
+  return <div className={`app-wrap ${shellClass}`}>
     <header className="topbar">
       <Link to="/" className="brand" aria-label="Ask Ambernath home"><img className="brand-logo" src="/ask-ambernath-logo-transparent.png" alt=""/><span>Ask <b>Ambernath</b></span></Link>
       <div className="top-actions">
@@ -131,7 +131,7 @@ function CategoryPhoto({ category }) {
 function HomePage() {
   const categoriesState = useLoad('/categories');
   const businessesState = useLoad('/businesses?limit=6');
-  return <Shell>
+  return <Shell shellClass="home-shell">
     <section className="hero home-hero" aria-labelledby="home-hero-title">
       <div className="home-hero-copy">
         <h1 id="home-hero-title">
