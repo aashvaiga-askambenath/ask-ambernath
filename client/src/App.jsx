@@ -1,7 +1,8 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import {
-  ArrowLeft, BadgeCheck, Bell, ChevronRight, Clock3, Droplets, Heart, Home, MapPin, Package,
-  Phone, Plus, Search, Share2, ShieldCheck, SlidersHorizontal, Store, Trash2, User, Wrench, X,
+  ArrowLeft, BadgeCheck, Bell, Building2, ChevronRight, Clock3, Droplets, Eye, EyeOff, Heart, Home,
+  LockKeyhole, MapPin, Package, Phone, Plus, Search, Share2, ShieldCheck, SlidersHorizontal, Store,
+  Trash2, User, Wrench, X,
 } from 'lucide-react';
 import {
   Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams,
@@ -429,9 +430,13 @@ function AuthPage() {
   const { user, login, register, resetPassword, updatePassword } = useAuth();
   const initialMode = params.get('mode') || 'login';
   const [mode, setMode] = useState(initialMode);
-  const [form, setForm] = useState({ name: '', email: '', phone: '', password: '', role: 'customer' });
+  const [form, setForm] = useState({
+    name: '', email: '', phone: '', password: '',
+    role: params.get('role') === 'business_owner' ? 'business_owner' : 'customer',
+  });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   if (user && mode !== 'update-password') return <Navigate to="/account" replace/>;
   const submit = async (event) => {
     event.preventDefault(); setBusy(true); setError('');
@@ -440,25 +445,134 @@ function AuthPage() {
       else if (mode === 'signup') {
         const result = await register(form);
         if (result.needsEmailConfirmation) { setMode('confirm'); return; }
-        navigate(form.role === 'business_owner' ? '/business' : '/account');
+        navigate(form.role === 'business_owner' ? '/list-business' : '/account');
       } else if (mode === 'forgot') { await resetPassword(form.email); setMode('sent'); }
       else if (mode === 'update-password') { await updatePassword(form.password); toast('Password updated'); navigate('/account'); }
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   };
-  const heading = { login: 'Welcome back', signup: 'Create your account', forgot: 'Reset your password', sent: 'Check your email', confirm: 'Verify your email', 'update-password': 'Choose a new password' }[mode] || 'Sign in';
-  return <Shell><div className="auth-wrap"><div className="auth-brand"><span className="brand-dot">A</span><span>Ask <b>Ambernath</b></span></div><h1>{heading}</h1>
-    {mode === 'confirm' || mode === 'sent' ? <><p className="muted-note">If an account can receive email at that address, we’ve sent the next steps.</p><button className="ghost-btn" onClick={() => setMode('login')}>Back to sign in</button></> :
-      <form className="card auth-form" onSubmit={submit}>
-        {mode === 'signup' && <><label>Your name<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} minLength={2} maxLength={100}/></label><label>Phone<input type="tel" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} maxLength={20}/></label><label>Account type<select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })}><option value="customer">Customer</option><option value="business_owner">Business owner</option></select></label></>}
-        {mode !== 'update-password' && <label>Email<input type="email" autoComplete="email" required value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} maxLength={254}/></label>}
-        {mode !== 'forgot' && <label>Password<input type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required minLength={mode === 'login' ? 1 : 8} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })}/></label>}
-        {error && <p className="form-error" role="alert">{error}</p>}
-        <button className="primary-btn wide" disabled={busy}>{busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : mode === 'signup' ? 'Create account' : mode === 'forgot' ? 'Send reset email' : 'Update password'}</button>
-        {mode === 'login' && <button type="button" className="text-button" onClick={() => setMode('forgot')}>Forgot password?</button>}
-        {(mode === 'login' || mode === 'signup') && <button type="button" className="text-button" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(''); }}>{mode === 'login' ? 'New to Ask Ambernath? Create an account' : 'Already have an account? Sign in'}</button>}
-      </form>}
-    <p className="muted-note">By continuing, you agree to our <Link to="/terms">Terms</Link> and <Link to="/privacy">Privacy Policy</Link>.</p>
-  </div></Shell>;
+  const isComplete = mode === 'confirm' || mode === 'sent';
+  const heading = {
+    login: 'Welcome back',
+    signup: form.role === 'business_owner' ? 'Join as a local business' : 'Create your account',
+    forgot: 'Reset your password',
+    sent: 'Check your inbox',
+    confirm: 'Verify your email',
+    'update-password': 'Choose a new password',
+  }[mode] || 'Welcome back';
+  const description = {
+    login: 'Sign in to continue your journey with Ask Ambernath.',
+    signup: form.role === 'business_owner'
+      ? 'Create your owner account, then set up your business listing.'
+      : 'Join your neighbourhood and discover what Ambernath has to offer.',
+    forgot: 'Enter the email address linked to your account and we’ll send password reset instructions.',
+    sent: 'If an account can receive email at that address, password reset instructions are on their way.',
+    confirm: 'If an account can receive email at that address, a verification link is on its way.',
+    'update-password': 'Choose a strong password you have not used before.',
+  }[mode];
+  const changeMode = (nextMode) => { setMode(nextMode); setError(''); setShowPassword(false); };
+  return <div className="auth-page">
+    <header className="auth-site-header">
+      <Link to="/" className="auth-site-brand" aria-label="Ask Ambernath home">
+        <img src="/brand.svg" alt="" />
+        <span>Ask <b>Ambernath</b></span>
+      </Link>
+      <nav className="auth-site-actions" aria-label="Site navigation">
+        <Link to="/explore" className="auth-header-explore">Explore</Link>
+        <button type="button" className="auth-header-cta" onClick={() => changeMode(mode === 'login' ? 'signup' : 'login')}>
+          {mode === 'login' ? 'Create account' : 'Sign in'}
+        </button>
+      </nav>
+    </header>
+    <main className="auth-layout">
+    <section className="auth-intro" aria-label="About Ask Ambernath">
+      <div className="auth-intro-copy">
+        <span className="auth-kicker"><MapPin size={14}/> YOUR NEIGHBOURHOOD, CONNECTED</span>
+        <h1>Your City. Your People. <span>Your Possibilities.</span></h1>
+        <p>Discover local businesses, connect with services, and grow together with Ambernath.</p>
+        <ul className="auth-benefits">
+          <li><span><Search size={16}/></span>Discover local businesses</li>
+          <li><span><BadgeCheck size={16}/></span>Find trusted services</li>
+          <li><span><Building2 size={16}/></span>Grow your business</li>
+        </ul>
+      </div>
+      <div className="auth-city-art" aria-hidden="true">
+        <div className="auth-art-glow"/>
+        <svg viewBox="0 0 640 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M37 265h566M66 265v-89h52v89m17 0V139h61v126m15 0v-62h37v62m16 0V99h70v166m15 0v-47h45v47m15 0V151h55v114m18 0v-78h55v78m17 0v-44h42v44" stroke="currentColor" strokeWidth="2"/>
+          <path d="M142 158h10m20 0h10m-40 19h10m20 0h10m102-49h14m20 0h14m-48 21h14m20 0h14m-48 21h14m20 0h14m92 20h12m18 0h12m-42 19h12m18 0h12m54-40h12m18 0h12m-42 19h12m18 0h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" opacity=".8"/>
+          <path d="m87 166 57-42 69 17 73-64 71 33 67-47 60 41 70-27" stroke="currentColor" strokeWidth="1.5" strokeDasharray="4 7" opacity=".65"/>
+          <circle cx="87" cy="166" r="5" fill="#D6C8FF"/><circle cx="213" cy="141" r="5" fill="#D6C8FF"/><circle cx="286" cy="77" r="5" fill="#D6C8FF"/><circle cx="357" cy="110" r="5" fill="#D6C8FF"/><circle cx="424" cy="63" r="5" fill="#D6C8FF"/><circle cx="484" cy="104" r="5" fill="#D6C8FF"/><circle cx="554" cy="77" r="5" fill="#D6C8FF"/>
+          <path d="M286 61c-9 0-16 7-16 16 0 12 16 27 16 27s16-15 16-27c0-9-7-16-16-16Zm0 21a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z" fill="#fff" fillRule="evenodd"/>
+        </svg>
+        <span className="auth-art-label"><MapPin size={14}/> Ambernath, Maharashtra</span>
+      </div>
+      <p className="auth-footer-note">Made for the place we call home.</p>
+    </section>
+
+    <section className="auth-panel" aria-label="Account access">
+      <div className="auth-card">
+        <div className="auth-card-heading">
+          {isComplete && <span className="auth-success-icon"><BadgeCheck size={22}/></span>}
+          <h2>{heading}</h2>
+          <p>{description}</p>
+        </div>
+        {isComplete ? <div className="auth-completion">
+          <p>{mode === 'sent' ? 'Check your email for a secure link to choose a new password. You can return here to sign in once you’re done.' : 'Open the link in your email to confirm your address. Once confirmed, come back here to sign in.'}</p>
+          <button type="button" className="primary-btn auth-submit" onClick={() => changeMode('login')}>Back to sign in</button>
+        </div> : <form className="auth-form" onSubmit={submit}>
+          {mode === 'signup' && <>
+            <label htmlFor="auth-name">Full name</label>
+            <input id="auth-name" autoComplete="name" required minLength={2} maxLength={100} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Your name"/>
+          </>}
+          {mode !== 'update-password' && <>
+            <label htmlFor="auth-email">{mode === 'forgot' ? 'Email address' : 'Email'}</label>
+            <input id="auth-email" type="email" inputMode="email" autoComplete="email" required value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} maxLength={254} placeholder="you@example.com"/>
+          </>}
+          {mode === 'signup' && <>
+            <label htmlFor="auth-phone">Mobile number <span className="auth-optional">(optional)</span></label>
+            <input id="auth-phone" type="tel" autoComplete="tel" maxLength={20} value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} placeholder="Your mobile number"/>
+            <label htmlFor="auth-role">I’m joining as</label>
+            <select id="auth-role" value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })}>
+              <option value="customer">A customer</option>
+              <option value="business_owner">A business owner</option>
+            </select>
+            {form.role === 'business_owner' && <p className="auth-field-note">After creating your account, you’ll add your business name, category, contact details, and Ambernath area.</p>}
+          </>}
+          {mode !== 'forgot' && <>
+            <div className="auth-password-label">
+              <label htmlFor="auth-password">Password</label>
+              {mode === 'login' && <button type="button" className="auth-link" onClick={() => changeMode('forgot')}>Forgot password?</button>}
+            </div>
+            <div className="auth-password-input">
+              <LockKeyhole size={17} aria-hidden="true"/>
+              <input id="auth-password" type={showPassword ? 'text' : 'password'} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required minLength={mode === 'login' ? 1 : 8} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} placeholder={mode === 'login' ? 'Enter your password' : 'At least 8 characters'}/>
+              <button type="button" className="auth-password-toggle" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? 'Hide password' : 'Show password'} aria-pressed={showPassword}>
+                {showPassword ? <EyeOff size={17}/> : <Eye size={17}/>}
+              </button>
+            </div>
+            {mode !== 'login' && <p className="auth-field-note">Use at least 8 characters for a stronger password.</p>}
+          </>}
+          {error && <p className="form-error auth-error" role="alert">{error}</p>}
+          <button className="primary-btn auth-submit" disabled={busy} aria-busy={busy}>
+            {busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : mode === 'signup' ? 'Create account' : mode === 'forgot' ? 'Send reset instructions' : 'Update password'}
+          </button>
+          {(mode === 'login' || mode === 'signup') && <p className="auth-switch">
+            {mode === 'login' ? 'New to Ask Ambernath?' : 'Already have an account?'}{' '}
+            <button type="button" className="auth-link" onClick={() => changeMode(mode === 'login' ? 'signup' : 'login')}>
+              {mode === 'login' ? 'Create an account' : 'Sign in'}
+            </button>
+          </p>}
+          {mode === 'signup' && form.role === 'customer' && <button type="button" className="auth-business-link" onClick={() => setForm({ ...form, role: 'business_owner' })}>
+            <Building2 size={16}/> Register as a local business <ChevronRight size={16}/>
+          </button>}
+          {mode === 'forgot' && <button type="button" className="auth-back-link" onClick={() => changeMode('login')}><ArrowLeft size={15}/> Back to sign in</button>}
+        </form>}
+        <p className="auth-legal">By continuing, you agree to our <Link to="/terms">Terms</Link> and <Link to="/privacy">Privacy Policy</Link>.</p>
+      </div>
+      <p className="auth-mobile-note">Made for the place we call home.</p>
+    </section>
+    </main>
+  </div>;
 }
 
 function Account() {
