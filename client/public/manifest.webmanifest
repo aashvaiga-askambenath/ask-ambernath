@@ -8,10 +8,10 @@
   "theme_color": "#5d35d5",
   "icons": [
     {
-      "src": "/brand.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "src": "/ask-ambernath-logo.png",
+      "sizes": "768x768",
+      "type": "image/png",
+      "purpose": "any"
     }
   ]
 }
