@@ -93,29 +93,72 @@ function CategoryIcon({ category }) {
   return <Store size={23}/>;
 }
 
+const CATEGORY_PHOTOS = {
+  water: '/category-photos/water-supply.webp',
+  'home-services': '/category-photos/home-services.webp',
+  electrician: '/category-photos/electrician.webp',
+  'ac-technician': '/category-photos/ac-technician.jpg',
+  food: '/category-photos/tiffin-food.webp',
+  tuition: '/category-photos/tuition.webp',
+  travel: '/category-photos/travel-transport.webp',
+  salon: '/category-photos/salon-wellness.webp',
+  bakery: '/category-photos/bakery-cakes.webp',
+  events: '/category-photos/events-decoration.webp',
+  workshops: '/category-photos/workshops-manufacturing.webp',
+  other: '/category-photos/other-services.webp',
+  photography: '/category-photos/photography.webp',
+  'graphic-and-advertising': '/category-photos/graphic-design.webp',
+};
+const CATEGORY_PHOTO_FALLBACK = '/category-photos/other-services.webp';
+
+function CategoryPhoto({ category }) {
+  const [hasImageError, setHasImageError] = useState(false);
+  const imageSrc = hasImageError
+    ? CATEGORY_PHOTO_FALLBACK
+    : CATEGORY_PHOTOS[category.slug] || CATEGORY_PHOTO_FALLBACK;
+
+  return <img
+    src={imageSrc}
+    alt={`${category.name} services`}
+    width="58"
+    height="58"
+    loading="lazy"
+    decoding="async"
+    onError={() => setHasImageError(true)}
+  />;
+}
+
 function HomePage() {
   const categoriesState = useLoad('/categories');
   const businessesState = useLoad('/businesses?limit=6');
   return <Shell>
-    <section className="hero">
-      <div className="location"><MapPin size={16}/> Ambernath <span aria-hidden="true">⌄</span></div>
-      <p className="eyebrow">Namaskar 👋</p>
-      <h1>Ask <span>Ambernath</span> anything local.</h1>
-      <p className="hero-sub">Whatever you need. Find it locally. One app, all businesses.</p>
-      <Link to="/ask" className="search-card"><span className="spark">✦</span><span><b>What do you need today?</b><small>Try “a plumber in Ambernath West”</small></span><Search size={18}/></Link>
+    <section className="hero home-hero" aria-labelledby="home-hero-title">
+      <div className="home-hero-copy">
+        <h1 id="home-hero-title">
+          <span>Shop Local</span>
+          <span>Support Local</span>
+          <span className="home-hero-accent">Grow Together <Heart size={23} aria-hidden="true"/></span>
+        </h1>
+        <p>Discover the best products, services &amp; local businesses from Ambernath – all in one place.</p>
+      </div>
+      <div className="home-hero-note" aria-hidden="true">
+        <span>Local Business</span>
+        <span>Local Growth</span>
+        <Heart size={17}/>
+      </div>
     </section>
     <section className="card overlap">
-      <div className="section-head"><h2>Browse categories</h2><Link to="/explore">Explore all</Link></div>
+      <div className="section-head"><h2>Find what you need</h2><Link to="/explore">View all</Link></div>
       {categoriesState.loading ? <Loading label="Loading categories…"/> : categoriesState.error ? <ErrorState message={categoriesState.error}/> :
         categoriesState.data?.categories?.length ? <div className="cat-grid">{categoriesState.data.categories.slice(0, 8).map((category) =>
-          <Link key={category.id} to={`/explore?cat=${encodeURIComponent(category.slug)}`} className="cat"><span><CategoryIcon category={category.name}/></span><b>{category.name}</b></Link>)}</div> :
-          <EmptyState title="Categories coming soon" text="Local service categories will appear here once they are available."/>}
+          <Link key={category.id} to={`/explore?cat=${encodeURIComponent(category.slug)}`} className="cat"><span><CategoryPhoto category={category}/></span><b>{category.name}</b></Link>)}</div> :
+          <EmptyState title="New categories are on the way" text="We’re making room for more of Ambernath’s local businesses."/>}
     </section>
     <section className="section">
-      <div className="section-head"><h2>Available in Ambernath</h2><Link to="/explore">See all</Link></div>
+      <div className="section-head"><h2>Discover local businesses</h2><Link to="/explore">Explore all</Link></div>
       {businessesState.loading ? <Loading label="Finding local businesses…"/> : businessesState.error ? <ErrorState message={businessesState.error}/> :
         businessesState.data?.businesses?.length ? <div className="business-grid">{businessesState.data.businesses.map((business) => <BusinessCard key={business.id} business={business}/>)}</div> :
-          <EmptyState title="No businesses available yet" text="Check again soon or tell us what you need." action={<Link className="primary-btn" to="/list-business">List your business</Link>}/>}
+          <EmptyState title="A new local favourite starts here" text="There aren’t any businesses to feature just yet. Know a local provider? Invite them to join." action={<Link className="primary-btn" to="/list-business">List your business</Link>}/>}
     </section>
   </Shell>;
 }
