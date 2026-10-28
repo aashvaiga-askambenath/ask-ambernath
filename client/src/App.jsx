@@ -46,7 +46,7 @@ function Shell({ children, pageClass = '' }) {
   const { user } = useAuth();
   return <div className="app-wrap">
     <header className="topbar">
-      <Link to="/" className="brand" aria-label="Ask Ambernath home"><img className="brand-logo" src="/ask-ambernath-logo.png" alt=""/><span>Ask <b>Ambernath</b></span></Link>
+      <Link to="/" className="brand" aria-label="Ask Ambernath home"><img className="brand-logo" src="/ask-ambernath-logo-transparent.png" alt=""/><span>Ask <b>Ambernath</b></span></Link>
       <div className="top-actions">
         {user ? <Link className="mini-user" to="/account">{user.name?.split(' ')[0] || 'Account'}</Link> : <Link className="ghost-btn" to="/auth">Sign in</Link>}
         <Link className="icon-btn" to={user ? '/account/notifications' : '/account'} aria-label="Account and notifications"><Bell size={18}/></Link>
@@ -516,7 +516,7 @@ function AuthPage() {
   return <div className="auth-page">
     <header className="auth-site-header">
       <Link to="/" className="auth-site-brand" aria-label="Ask Ambernath home">
-        <img src="/ask-ambernath-logo.png" alt="" />
+        <img src="/ask-ambernath-logo-transparent.png" alt="" />
         <span>Ask <b>Ambernath</b></span>
       </Link>
       <nav className="auth-site-actions" aria-label="Site navigation">
