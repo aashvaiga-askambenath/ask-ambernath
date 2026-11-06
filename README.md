@@ -48,11 +48,13 @@ The service-role key is used only in the Express process. Browser requests use t
 
 1. Create a Supabase project and choose a strong database password. Do not put the database password or service-role key in source control.
 2. Apply every checked-in migration in filename order. Together, they create the normalized schema, indexes, RLS policies, two storage buckets, transaction functions, initial service categories, the inside-shop-photo field, and zero-fee defaults. They do not create people, businesses, orders, or admin accounts. To use the Supabase CLI, initialize its local config once with `npx supabase init`, then run `npx supabase login`, `npx supabase link --project-ref YOUR_PROJECT_REF`, and `npx supabase db push` from the project root.
-3. In Authentication settings, configure the desired email provider and email verification policy. Set the Site URL and allowlisted redirect URLs for local development and the final HTTPS app domain. Password recovery returns to `/auth?mode=update-password`.
+3. In Authentication settings, configure the desired email provider and email verification policy. To enable phone login, enable phone authentication and configure an SMS/WhatsApp provider and WhatsApp message template; the app requests codes through Supabase Auth's WhatsApp channel. Set the Site URL and allowlisted redirect URLs for local development and the final HTTPS app domain. Password recovery returns to `/auth?mode=update-password`.
 4. The migration configures:
    - `business-media`: public read for approved marketplace imagery; owner uploads must be under that owner's business UUID.
    - `verification-documents`: private PDF bucket; business owners can upload/read their own documents and administrators receive short-lived signed read URLs.
-5. Review the generated policies in the Supabase dashboard before launch. RLS is enabled on all application tables. Admins can manage platform and delivery fees from the dashboard; customers see the configured amounts and order total at checkout, and fee changes apply to new orders only. The API also validates bearer sessions, roles, ownership, and input. Never expose the service-role key to a client.
+5. Review the generated policies in the Supabase dashboard before launch. RLS is enabled on all application tables. Admins can manage platform and delivery fees from the dashboard; customers see the configured amounts and order total at checkout, and fee changes apply to new orders only. Admins can publish wage listings from the Jobs tab; applications are visible only to platform admins. Support requests receive ticket numbers, and signed-in users can view their own ticket status. The API also validates bearer sessions, roles, ownership, and input. Never expose the service-role key to a client.
+
+The Contact support page includes links to submit suggestions and service requirements. WhatsApp customer support is a click-to-chat link only; an automated WhatsApp chatbot is not configured. Phone OTP and email reset delivery are subject to Supabase/provider rate limits. If password reset emails are temporarily rate-limited, wait for the provider's cooldown or use phone sign-in after the phone has been registered and verified.
 
 ### First super administrator
 
@@ -92,6 +94,8 @@ Copy `.env.example`; use Render’s environment settings for production:
 | `LOG_LEVEL` | Optional | Reserved for deployment log filtering; defaults to `info`. |
 
 The `SUPABASE_SERVICE_ROLE_KEY`, `APP_URL`, and `CLIENT_ORIGIN` are checked at production startup. The service-role key is never bundled into Vite assets. The local `.env` file may contain stale values from the former prototype; the current app does not read its old JWT or MongoDB settings.
+
+Keep `.env` out of source control and configure server-only keys as private Render environment variables. `VITE_SUPABASE_ANON_KEY` is a public browser key, not a secret; never put the service-role key in a `VITE_*` variable. Apply the new support/jobs migration before deploying a build that uses ticket tracking or job listings.
 
 ## Running and quality checks
 

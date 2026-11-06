@@ -808,6 +808,64 @@ button:disabled {
   .home-hero-note svg { margin-top: 3px; }
 }
 
+.auth-method-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+  padding: 4px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #f7f5fc;
+}
+.auth-method-switch button {
+  min-height: 38px;
+  border-radius: 10px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 850;
+}
+.auth-method-switch button.active { color: var(--purple); background: #fff; box-shadow: 0 2px 8px #2b20420d; }
+.support-request-links { margin: 14px 0; }
+.support-request-links .quick { min-width: 0; }
+.support-ticket-card { padding: 15px; }
+.support-ticket-card p { margin: 9px 0; color: var(--muted); white-space: pre-line; }
+.support-ticket-heading,
+.job-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ticket-confirmation { display: grid; justify-items: start; gap: 8px; padding: 20px; margin: 14px 0; }
+.ticket-confirmation h2,
+.ticket-confirmation p { margin: 0; }
+.ticket-confirmation > strong { color: var(--purple); font-size: 24px; letter-spacing: .06em; }
+.request-form { padding: 17px; }
+.job-listings { display: grid; gap: 13px; }
+.job-card { padding: 18px; }
+.job-card h2,
+.job-card p { margin: 0 0 8px; }
+.job-card-heading strong { color: var(--purple); white-space: nowrap; }
+.job-card > p { color: var(--muted); line-height: 1.55; }
+.job-wage-fields { display: grid; grid-template-columns: 1fr 1fr .8fr; gap: 10px; }
+.job-admin-form { grid-template-columns: 1fr; align-items: stretch; }
+.job-admin-form h3 { margin: 0; }
+.job-admin-form textarea { min-height: 90px; resize: vertical; }
+.status-open,
+.status-in_progress,
+.status-received,
+.status-reviewing { color: #5031b1; background: #f0ebff; }
+.status-resolved,
+.status-contacted { color: #13724e; background: #e9f8f1; }
+.status-closed { color: #a62742; background: #fff0f3; }
+@media (max-width: 650px) {
+  .support-request-links { grid-template-columns: 1fr; }
+  .job-wage-fields { grid-template-columns: 1fr; gap: 0; }
+  .job-card-heading { flex-direction: column; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }

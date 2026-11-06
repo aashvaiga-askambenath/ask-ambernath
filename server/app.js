@@ -11,7 +11,10 @@ const { HttpError, asyncRoute } = require('./lib/errors');
 const { adminRoles, transitions, canTransition, canAccessOrder, mapService, mapBusiness, mapOrder, mapCreatedOrder, slugify, escapeFilter, escapeXml } = require('./lib/domain');
 const { authenticate, optionalAuthenticate, requireRole, validateUuidParam } = require('./middleware/auth');
 const { ownedBusiness, activeCategoryById, businessVerificationUpdate, businessImageColumn, getCheckoutFees, notify, audit } = require('./services/marketplace');
-const { businessSchema, serviceSchema, addressSchema, orderSchema, reviewSchema, supportSchema, categorySchema } = require('./validators/schemas');
+const {
+  businessSchema, serviceSchema, addressSchema, orderSchema, reviewSchema, supportSchema,
+  jobListingSchema, jobApplicationSchema, categorySchema,
+} = require('./validators/schemas');
 
 function validateEnvironment() {
   const production = process.env.NODE_ENV === 'production';
@@ -111,6 +114,7 @@ function createApp(config = validateEnvironment()) {
   };
   app.use('/api', rateLimit({ ...rateOptions, windowMs: 60_000, limit: 180 }));
   app.use('/api/auth', rateLimit({ ...rateOptions, windowMs: 15 * 60_000, limit: 30 }));
+  app.use('/api/jobs/applications', rateLimit({ ...rateOptions, windowMs: 60 * 60_000, limit: 5 }));
 
   app.get('/api/health', (_req, res) => res.json({
     ok: true,
@@ -489,12 +493,38 @@ function createApp(config = validateEnvironment()) {
   }));
   app.post('/api/support', optionalAuthenticate, asyncRoute(async (req, res) => {
     const body = supportSchema.parse(req.body);
-    const { error } = await req.supabase.from('support_requests').insert({
+    const { data, error } = await req.supabase.from('support_requests').insert({
       user_id: req.user?.id || null, name: body.name, phone: body.phone, email: body.email || null,
       subject: body.subject, message: body.message,
+    }).select('ticket_number').single();
+    if (error) throw error;
+    res.status(201).json({ message: 'Support request submitted', ticketNumber: data.ticket_number });
+  }));
+  app.get('/api/support/mine', authenticate, asyncRoute(async (req, res) => {
+    const { data, error } = await req.supabase.from('support_requests')
+      .select('ticket_number,subject,status,message,created_at,updated_at')
+      .eq('user_id', req.user.id).order('created_at', { ascending: false }).limit(100);
+    if (error) throw error;
+    res.json({ requests: data });
+  }));
+  app.get('/api/jobs', asyncRoute(async (req, res) => {
+    const { data, error } = await req.supabase.from('job_listings').select('*').eq('is_active', true)
+      .order('created_at', { ascending: false }).limit(100);
+    if (error) throw error;
+    res.json({ jobs: data });
+  }));
+  app.post('/api/jobs/applications', optionalAuthenticate, asyncRoute(async (req, res) => {
+    const body = jobApplicationSchema.parse(req.body);
+    const { data: job, error: jobError } = await req.supabase.from('job_listings').select('id')
+      .eq('id', body.jobId).eq('is_active', true).maybeSingle();
+    if (jobError) throw jobError;
+    if (!job) throw new HttpError(404, 'JOB_NOT_FOUND', 'This job is no longer available');
+    const { error } = await req.supabase.from('job_applications').insert({
+      job_id: body.jobId, user_id: req.user?.id || null, name: body.name, phone: body.phone,
+      email: body.email || null, message: body.message,
     });
     if (error) throw error;
-    res.status(201).json({ message: 'Support request submitted' });
+    res.status(201).json({ message: 'Your application has been received' });
   }));
 
   app.get('/api/admin/metrics', authenticate, requireRole(...adminRoles), asyncRoute(async (req, res) => {
@@ -626,6 +656,37 @@ function createApp(config = validateEnvironment()) {
     const { data, error } = await req.supabase.from('support_requests').select('*').order('created_at', { ascending: false }).limit(200);
     if (error) throw error;
     res.json({ requests: data });
+  }));
+  app.get('/api/admin/jobs', authenticate, requireRole(...adminRoles), asyncRoute(async (req, res) => {
+    const { data, error } = await req.supabase.from('job_listings').select('*').order('created_at', { ascending: false }).limit(200);
+    if (error) throw error;
+    res.json({ jobs: data });
+  }));
+  app.post('/api/admin/jobs', authenticate, requireRole(...adminRoles), asyncRoute(async (req, res) => {
+    const body = jobListingSchema.parse(req.body);
+    const { data, error } = await req.supabase.from('job_listings').insert({
+      title: body.title, description: body.description, location: body.location,
+      employment_type: body.employmentType, wage_min: body.wageMin, wage_max: body.wageMax,
+      wage_period: body.wagePeriod, requirements: body.requirements, is_active: body.isActive,
+    }).select().single();
+    if (error) throw error;
+    await audit(req.supabase, req.user.id, 'job_listing_created', 'job_listing', data.id, {});
+    res.status(201).json({ job: data });
+  }));
+  app.patch('/api/admin/jobs/:id', authenticate, requireRole(...adminRoles), validateUuidParam(), asyncRoute(async (req, res) => {
+    const { isActive } = z.object({ isActive: z.boolean() }).parse(req.body);
+    const { data, error } = await req.supabase.from('job_listings')
+      .update({ is_active: isActive }).eq('id', req.params.id).select().maybeSingle();
+    if (error) throw error;
+    if (!data) throw new HttpError(404, 'JOB_NOT_FOUND', 'Job listing not found');
+    await audit(req.supabase, req.user.id, isActive ? 'job_listing_published' : 'job_listing_closed', 'job_listing', data.id, {});
+    res.json({ job: data });
+  }));
+  app.get('/api/admin/job-applications', authenticate, requireRole(...adminRoles), asyncRoute(async (req, res) => {
+    const { data, error } = await req.supabase.from('job_applications')
+      .select('*,job_listings(title)').order('created_at', { ascending: false }).limit(200);
+    if (error) throw error;
+    res.json({ applications: data });
   }));
   app.get('/api/admin/reviews', authenticate, requireRole(...adminRoles), asyncRoute(async (req, res) => {
     const { data, error } = await req.supabase.from('reviews').select('*,profiles(full_name),businesses(name)').order('created_at', { ascending: false }).limit(200);
@@ -767,5 +828,6 @@ function createApp(config = validateEnvironment()) {
 
 module.exports = {
   createApp, validateEnvironment, transitions, canTransition, canAccessOrder,
-  mapBusiness, mapOrder, mapCreatedOrder, businessSchema, orderSchema, HttpError, requireRole, deleteStorageFolder,
+  mapBusiness, mapOrder, mapCreatedOrder, businessSchema, orderSchema, jobListingSchema, jobApplicationSchema,
+  HttpError, requireRole, deleteStorageFolder,
 };

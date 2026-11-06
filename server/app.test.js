@@ -2,7 +2,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { businessSchema, canAccessOrder, canTransition, createApp, mapBusiness, mapCreatedOrder, mapOrder, orderSchema, requireRole, validateEnvironment } = require('./app');
+const {
+  businessSchema, canAccessOrder, canTransition, createApp, jobApplicationSchema, jobListingSchema,
+  mapBusiness, mapCreatedOrder, mapOrder, orderSchema, requireRole, validateEnvironment,
+} = require('./app');
 const { activeCategoryById, businessVerificationUpdate, businessImageColumn, getCheckoutFees } = require('./services/marketplace');
 
 test('order action buttons use clear imperative labels without changing status values', async () => {
@@ -157,6 +160,118 @@ test('business onboarding schema validates required fields and bounds', () => {
   assert.equal(businessSchema.parse(valid).services[0].price, 150);
   assert.throws(() => businessSchema.parse({ ...valid, pincode: '42150' }));
   assert.throws(() => businessSchema.parse({ ...valid, services: [{ name: 'Visit', price: -1 }] }));
+});
+
+test('job listings validate wage ranges, wage periods and employment types', () => {
+  const valid = {
+    title: 'Customer support associate',
+    description: 'Help local customers find services and follow up on open questions.',
+    location: 'Ambernath',
+    employmentType: 'full_time',
+    wageMin: 18000,
+    wageMax: 24000,
+    wagePeriod: 'month',
+  };
+  assert.equal(jobListingSchema.parse(valid).wagePeriod, 'month');
+  assert.throws(() => jobListingSchema.parse({ ...valid, wageMin: 25000 }));
+  assert.throws(() => jobListingSchema.parse({ ...valid, wagePeriod: 'year' }));
+  assert.throws(() => jobListingSchema.parse({ ...valid, employmentType: 'volunteer' }));
+});
+
+test('job applications validate contact data and job identifiers', () => {
+  const application = {
+    jobId: '57fbd44c-7e22-4dc1-b9ce-a9854872d124',
+    name: 'Local applicant',
+    phone: '+919876543210',
+    message: 'I have customer service experience.',
+  };
+  assert.equal(jobApplicationSchema.parse(application).name, 'Local applicant');
+  assert.throws(() => jobApplicationSchema.parse({ ...application, jobId: 'not-a-uuid' }));
+  assert.throws(() => jobApplicationSchema.parse({ ...application, phone: 'bad' }));
+});
+
+test('support ticket and job migration protects applicant data and exposes only active listings', () => {
+  const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '202611060001_support_tickets_and_jobs.sql'), 'utf8');
+  assert.match(migration, /ticket_number text unique[\s\S]+?default \('AA-'/);
+  assert.match(migration, /create table if not exists public\.job_applications/);
+  assert.match(migration, /job_listings_public_active[\s\S]+?using \(is_active\)/);
+  assert.match(migration, /job_applications_admin_all[\s\S]+?public\.is_platform_admin\(\)/);
+  assert.match(migration, /wage_max numeric\(12,2\) not null check \(wage_max >= wage_min\)/);
+});
+
+test('support ticket tracking is private and public jobs accept valid applications', async () => {
+  const supportRequests = [];
+  const applications = [];
+  const userId = '20c14d44-ea2f-4d87-a046-535ab6ff16c8';
+  const jobId = '57fbd44c-7e22-4dc1-b9ce-a9854872d124';
+  const jobs = [{ id: jobId, title: 'Support associate', is_active: true }];
+  const client = {
+    auth: { getUser: async () => ({ data: { user: { id: userId } }, error: null }) },
+    from(table) {
+      const filters = [];
+      const query = {
+        insert(values) {
+          if (table === 'support_requests') supportRequests.push(values);
+          if (table === 'job_applications') applications.push(values);
+          return query;
+        },
+        select: () => query,
+        eq(column, value) { filters.push([column, value]); return query; },
+        order: () => query,
+        limit: () => query,
+        single: async () => ({ data: { ticket_number: 'AA-TEST12345' }, error: null }),
+        maybeSingle: async () => {
+          if (table === 'profiles') return { data: { id: userId, full_name: 'Signed-in user', role: 'customer', is_active: true }, error: null };
+          if (table === 'job_listings') return { data: jobs.find((job) => job.id === filters.find(([column]) => column === 'id')?.[1] && job.is_active) || null, error: null };
+          return { data: null, error: null };
+        },
+        then(resolve, reject) {
+          let data = [];
+          if (table === 'support_requests') {
+            const userFilter = filters.find(([column]) => column === 'user_id');
+            data = supportRequests.filter((request) => userFilter && request.user_id === userFilter[1]);
+          } else if (table === 'job_listings') {
+            data = jobs.filter((job) => job.is_active);
+          }
+          return Promise.resolve({ data, error: null, count: data.length }).then(resolve, reject);
+        },
+      };
+      return query;
+    },
+  };
+  const app = createApp({ environment: 'test', clientOrigins: [], databaseConfigured: true, supabaseClient: client });
+  const server = app.listen(0, '127.0.0.1');
+  try {
+    await new Promise((resolve) => server.once('listening', resolve));
+    const root = `http://127.0.0.1:${server.address().port}/api`;
+    const submitted = await fetch(`${root}/support`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Guest user', phone: '9876543210', subject: 'Need local help', message: 'Please help me find a nearby service.' }),
+    });
+    assert.equal(submitted.status, 201);
+    assert.equal((await submitted.json()).ticketNumber, 'AA-TEST12345');
+
+    supportRequests.push({ user_id: userId, ticket_number: 'AA-OWNED1234', subject: 'My request', status: 'open' });
+    supportRequests.push({ user_id: 'another-user', ticket_number: 'AA-OTHER1234', subject: 'Private request', status: 'open' });
+    const tickets = await fetch(`${root}/support/mine`, { headers: { Authorization: 'Bearer test-token' } });
+    assert.equal(tickets.status, 200);
+    const ticketNumbers = (await tickets.json()).requests.map((request) => request.ticket_number);
+    assert.deepEqual(ticketNumbers, ['AA-OWNED1234']);
+
+    const publicJobs = await fetch(`${root}/jobs`);
+    assert.deepEqual((await publicJobs.json()).jobs, jobs);
+    const application = await fetch(`${root}/jobs/applications`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jobId, name: 'Candidate', phone: '9876543210', message: 'I would like to apply.' }),
+    });
+    assert.equal(application.status, 201);
+    assert.equal(applications.length, 1);
+    assert.equal(applications[0].job_id, jobId);
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
 });
 
 test('business onboarding looks up the selected active category by its UUID', async () => {

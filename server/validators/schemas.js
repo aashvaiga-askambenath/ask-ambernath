@@ -63,10 +63,34 @@ const supportSchema = z.object({
   email: z.string().email().max(254).optional().or(z.literal('')),
   subject: z.string().trim().min(3).max(160), message: z.string().trim().min(10).max(5000),
 });
+const jobListingSchema = z.object({
+  title: z.string().trim().min(3).max(120),
+  description: z.string().trim().min(10).max(5000),
+  location: z.string().trim().min(2).max(120),
+  employmentType: z.enum(['full_time', 'part_time', 'contract', 'internship']),
+  wageMin: z.number().min(0).max(10000000),
+  wageMax: z.number().min(0).max(10000000),
+  wagePeriod: z.enum(['hour', 'day', 'month']),
+  requirements: z.string().trim().max(3000).default(''),
+  isActive: z.boolean().default(true),
+}).refine((value) => value.wageMax >= value.wageMin, {
+  path: ['wageMax'],
+  message: 'Maximum wage must be at least the minimum wage',
+});
+const jobApplicationSchema = z.object({
+  jobId: z.string().uuid(),
+  name: z.string().trim().min(2).max(100),
+  phone: z.string().trim().regex(/^\+?[0-9 ()-]{8,18}$/),
+  email: z.string().email().max(254).optional().or(z.literal('')),
+  message: z.string().trim().max(2000).default(''),
+});
 const categorySchema = z.object({
   name: z.string().trim().min(2).max(80), iconKey: z.string().max(40).optional(),
   description: z.string().max(300).optional(), sortOrder: z.number().int().min(0).max(10000).optional(),
   isActive: z.boolean().optional(),
 });
 
-module.exports = { businessSchema, serviceSchema, addressSchema, deliveryAddressSchema, orderSchema, reviewSchema, supportSchema, categorySchema };
+module.exports = {
+  businessSchema, serviceSchema, addressSchema, deliveryAddressSchema, orderSchema, reviewSchema,
+  supportSchema, jobListingSchema, jobApplicationSchema, categorySchema,
+};
