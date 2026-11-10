@@ -7,6 +7,8 @@ const {
   mapBusiness, mapCreatedOrder, mapOrder, orderSchema, requireRole, validateEnvironment,
 } = require('./app');
 const { activeCategoryById, businessVerificationUpdate, businessImageColumn, getCheckoutFees } = require('./services/marketplace');
+const { createSupportMailer } = require('./services/support-email');
+const { supportSchema } = require('./validators/schemas');
 
 test('order action buttons use clear imperative labels without changing status values', async () => {
   const { orderActionLabel } = await import('../client/src/orderActions.mjs');
@@ -190,39 +192,111 @@ test('job applications validate contact data and job identifiers', () => {
   assert.throws(() => jobApplicationSchema.parse({ ...application, phone: 'bad' }));
 });
 
+test('support tickets require a valid email address for email status updates', () => {
+  const ticket = {
+    name: 'Local user',
+    phone: '9876543210',
+    subject: 'Need local help',
+    message: 'Please help me find a nearby service.',
+  };
+  assert.equal(supportSchema.parse({ ...ticket, email: 'user@gmail.com' }).email, 'user@gmail.com');
+  assert.throws(() => supportSchema.parse({ ...ticket, email: '' }));
+  assert.throws(() => supportSchema.parse({ ...ticket, email: 'not-an-email' }));
+});
+
+test('support mailer sends safe ticket receipt and status-update emails through Gmail', async () => {
+  const messages = [];
+  const mailer = createSupportMailer({
+    gmailUser: 'support@example.com',
+    gmailAppPassword: 'test only password',
+    transportFactory: (options) => {
+      assert.equal(options.service, 'gmail');
+      assert.equal(options.auth.user, 'support@example.com');
+      assert.equal(options.auth.pass, 'testonlypassword');
+      return { sendMail: async (message) => messages.push(message) };
+    },
+  });
+  const ticket = {
+    name: '<Customer>',
+    email: 'customer@gmail.com',
+    ticket_number: 'AA-TEST12345',
+    subject: 'Help & support',
+    message: '<script>alert(1)</script>',
+    status: 'in_progress',
+  };
+
+  await mailer(ticket, 'ticket_created');
+  await mailer(ticket, 'status_update');
+  assert.equal(messages.length, 2);
+  assert.equal(messages[0].to, 'customer@gmail.com');
+  assert.match(messages[0].subject, /received/);
+  assert.match(messages[0].html, /&lt;Customer&gt;/);
+  assert.doesNotMatch(messages[0].html, /<script>/);
+  assert.match(messages[1].subject, /Update/);
+  assert.match(messages[1].text, /in progress/);
+});
+
 test('support ticket and job migration protects applicant data and exposes only active listings', () => {
   const migration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '202611060001_support_tickets_and_jobs.sql'), 'utf8');
+  const communityJobs = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '202611090001_community_job_postings.sql'), 'utf8');
   assert.match(migration, /ticket_number text unique[\s\S]+?default \('AA-'/);
   assert.match(migration, /create table if not exists public\.job_applications/);
   assert.match(migration, /job_listings_public_active[\s\S]+?using \(is_active\)/);
   assert.match(migration, /job_applications_admin_all[\s\S]+?public\.is_platform_admin\(\)/);
   assert.match(migration, /wage_max numeric\(12,2\) not null check \(wage_max >= wage_min\)/);
+  assert.match(communityJobs, /approval_status text not null default 'approved'/);
+  assert.match(communityJobs, /using \(is_active and approval_status = 'approved'\)/);
+  assert.match(communityJobs, /using \(owner_id = auth\.uid\(\)\)/);
 });
 
 test('support ticket tracking is private and public jobs accept valid applications', async () => {
   const supportRequests = [];
   const applications = [];
+  const supportEmails = [];
   const userId = '20c14d44-ea2f-4d87-a046-535ab6ff16c8';
   const jobId = '57fbd44c-7e22-4dc1-b9ce-a9854872d124';
-  const jobs = [{ id: jobId, title: 'Support associate', is_active: true }];
+  const jobs = [{ id: jobId, title: 'Support associate', is_active: true, approval_status: 'approved' }];
+  let userRole = 'admin';
+  let createdJobId = 'c0d7b213-7a2c-4ad7-9e90-bd0db4dd9981';
+  const supportRequestId = 'd40e1234-b8a4-4c48-bf0f-0c1a8b8b2345';
   const client = {
     auth: { getUser: async () => ({ data: { user: { id: userId } }, error: null }) },
     from(table) {
       const filters = [];
+      let updates = null;
       const query = {
         insert(values) {
-          if (table === 'support_requests') supportRequests.push(values);
+          if (table === 'support_requests') {
+            supportRequests.push({
+              ...values,
+              id: supportRequestId,
+              ticket_number: 'AA-TEST12345',
+              status: 'open',
+            });
+          }
           if (table === 'job_applications') applications.push(values);
+          if (table === 'job_listings') jobs.push({ id: createdJobId, ...values });
           return query;
         },
+        update(values) { updates = values; return query; },
         select: () => query,
         eq(column, value) { filters.push([column, value]); return query; },
         order: () => query,
         limit: () => query,
-        single: async () => ({ data: { ticket_number: 'AA-TEST12345' }, error: null }),
+        single: async () => ({ data: table === 'job_listings' ? jobs[jobs.length - 1] : { ticket_number: 'AA-TEST12345' }, error: null }),
         maybeSingle: async () => {
-          if (table === 'profiles') return { data: { id: userId, full_name: 'Signed-in user', role: 'customer', is_active: true }, error: null };
-          if (table === 'job_listings') return { data: jobs.find((job) => job.id === filters.find(([column]) => column === 'id')?.[1] && job.is_active) || null, error: null };
+          if (table === 'profiles') return { data: { id: userId, full_name: 'Signed-in user', role: userRole, is_active: true }, error: null };
+          if (table === 'job_listings') {
+            const job = jobs.find((item) => item.id === filters.find(([column]) => column === 'id')?.[1]);
+            if (job && updates) Object.assign(job, updates);
+            return { data: job && (updates || (job.is_active && job.approval_status === 'approved')) ? job : null, error: null };
+          }
+          if (table === 'support_requests') {
+            const request = supportRequests.find((item) => item.id === filters.find(([column]) => column === 'id')?.[1]);
+            if (!request) return { data: null, error: null };
+            if (updates) Object.assign(request, updates);
+            return { data: { ...request }, error: null };
+          }
           return { data: null, error: null };
         },
         then(resolve, reject) {
@@ -231,7 +305,7 @@ test('support ticket tracking is private and public jobs accept valid applicatio
             const userFilter = filters.find(([column]) => column === 'user_id');
             data = supportRequests.filter((request) => userFilter && request.user_id === userFilter[1]);
           } else if (table === 'job_listings') {
-            data = jobs.filter((job) => job.is_active);
+            data = jobs.filter((job) => filters.every(([column, value]) => job[column] === value));
           }
           return Promise.resolve({ data, error: null, count: data.length }).then(resolve, reject);
         },
@@ -239,7 +313,13 @@ test('support ticket tracking is private and public jobs accept valid applicatio
       return query;
     },
   };
-  const app = createApp({ environment: 'test', clientOrigins: [], databaseConfigured: true, supabaseClient: client });
+  const app = createApp({
+    environment: 'test',
+    clientOrigins: [],
+    databaseConfigured: true,
+    supabaseClient: client,
+    supportMailer: async (ticket, notificationType) => supportEmails.push({ ticket, notificationType }),
+  });
   const server = app.listen(0, '127.0.0.1');
   try {
     await new Promise((resolve) => server.once('listening', resolve));
@@ -247,10 +327,34 @@ test('support ticket tracking is private and public jobs accept valid applicatio
     const submitted = await fetch(`${root}/support`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Guest user', phone: '9876543210', subject: 'Need local help', message: 'Please help me find a nearby service.' }),
+      body: JSON.stringify({ name: 'Guest user', phone: '9876543210', email: 'guest@gmail.com', subject: 'Need local help', message: 'Please help me find a nearby service.' }),
     });
     assert.equal(submitted.status, 201);
-    assert.equal((await submitted.json()).ticketNumber, 'AA-TEST12345');
+    const submission = await submitted.json();
+    assert.equal(submission.ticketNumber, 'AA-TEST12345');
+    assert.equal(submission.emailNotification, 'sent');
+    assert.equal(supportEmails[0].ticket.email, 'guest@gmail.com');
+    assert.equal(supportEmails[0].notificationType, 'ticket_created');
+
+    const updated = await fetch(`${root}/admin/support/${supportRequestId}`, {
+      method: 'PATCH',
+      headers: { Authorization: 'Bearer test-session-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'in_progress' }),
+    });
+    const updatedBody = await updated.json();
+    assert.equal(updated.status, 200, JSON.stringify(updatedBody));
+    assert.equal(updatedBody.emailNotification, 'sent');
+    assert.equal(supportEmails[1].notificationType, 'status_update');
+    assert.equal(supportEmails[1].ticket.status, 'in_progress');
+
+    const unchanged = await fetch(`${root}/admin/support/${supportRequestId}`, {
+      method: 'PATCH',
+      headers: { Authorization: 'Bearer test-session-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'in_progress' }),
+    });
+    assert.equal(unchanged.status, 200);
+    assert.equal((await unchanged.json()).emailNotification, 'not_needed');
+    assert.equal(supportEmails.length, 2);
 
     supportRequests.push({ user_id: userId, ticket_number: 'AA-OWNED1234', subject: 'My request', status: 'open' });
     supportRequests.push({ user_id: 'another-user', ticket_number: 'AA-OTHER1234', subject: 'Private request', status: 'open' });
@@ -261,6 +365,46 @@ test('support ticket tracking is private and public jobs accept valid applicatio
 
     const publicJobs = await fetch(`${root}/jobs`);
     assert.deepEqual((await publicJobs.json()).jobs, jobs);
+
+    userRole = 'customer';
+    const jobDraft = await fetch(`${root}/jobs`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Weekend shop helper',
+        description: 'Help customers and keep the shop organized during busy weekends.',
+        location: 'Ambernath East',
+        employmentType: 'part_time',
+        wageMin: 500,
+        wageMax: 700,
+        wagePeriod: 'day',
+        requirements: 'Weekend availability',
+      }),
+    });
+    assert.equal(jobDraft.status, 201);
+    const draft = (await jobDraft.json()).job;
+    assert.equal(draft.owner_id, userId);
+    assert.equal(draft.approval_status, 'pending');
+    assert.equal(draft.is_active, false);
+
+    const myJobs = await fetch(`${root}/jobs/mine`, { headers: { Authorization: 'Bearer test-token' } });
+    assert.equal(myJobs.status, 200);
+    assert.deepEqual((await myJobs.json()).jobs, [draft]);
+
+    const publicJobsAfterDraft = await fetch(`${root}/jobs`);
+    assert.deepEqual((await publicJobsAfterDraft.json()).jobs, jobs.slice(0, 1));
+
+    userRole = 'admin';
+    const approval = await fetch(`${root}/admin/jobs/${createdJobId}`, {
+      method: 'PATCH',
+      headers: { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approvalStatus: 'approved' }),
+    });
+    assert.equal(approval.status, 200);
+    assert.equal((await approval.json()).job.approval_status, 'approved');
+    const publicJobsAfterApproval = await fetch(`${root}/jobs`);
+    assert.deepEqual((await publicJobsAfterApproval.json()).jobs, jobs);
+
     const application = await fetch(`${root}/jobs/applications`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

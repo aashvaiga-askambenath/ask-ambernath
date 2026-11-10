@@ -11,6 +11,7 @@ const { HttpError, asyncRoute } = require('./lib/errors');
 const { adminRoles, transitions, canTransition, canAccessOrder, mapService, mapBusiness, mapOrder, mapCreatedOrder, slugify, escapeFilter, escapeXml } = require('./lib/domain');
 const { authenticate, optionalAuthenticate, requireRole, validateUuidParam } = require('./middleware/auth');
 const { ownedBusiness, activeCategoryById, businessVerificationUpdate, businessImageColumn, getCheckoutFees, notify, audit } = require('./services/marketplace');
+const { createSupportMailer } = require('./services/support-email');
 const {
   businessSchema, serviceSchema, addressSchema, orderSchema, reviewSchema, supportSchema,
   jobListingSchema, jobApplicationSchema, categorySchema,
@@ -54,8 +55,30 @@ function validateEnvironment() {
     supabaseUrl: process.env.SUPABASE_URL,
     supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
     supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+    supportMailer: createSupportMailer({
+      gmailUser: process.env.GMAIL_USER,
+      gmailAppPassword: process.env.GMAIL_APP_PASSWORD,
+    }),
     databaseConfigured: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY && process.env.SUPABASE_SERVICE_ROLE_KEY),
   };
+}
+
+async function sendSupportEmail(mailer, ticket, notificationType) {
+  if (!ticket.email) return 'no_recipient';
+  if (!mailer) return 'not_configured';
+  try {
+    await mailer(ticket, notificationType);
+    return 'sent';
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: 'error',
+      message: 'Support email notification failed',
+      ticketNumber: ticket.ticket_number,
+      notificationType,
+      errorCode: error.code || 'SMTP_SEND_FAILED',
+    }));
+    return 'failed';
+  }
 }
 
 async function deleteStorageFolder(client, bucket, prefix) {
@@ -82,6 +105,7 @@ async function deleteStorageFolder(client, bucket, prefix) {
 
 function createApp(config = validateEnvironment()) {
   const app = express();
+  const supportMailer = config.supportMailer ?? null;
   const supabase = config.supabaseClient || (config.databaseConfigured
     ? createClient(config.supabaseUrl, config.supabaseServiceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } })
     : null);
@@ -494,11 +518,16 @@ function createApp(config = validateEnvironment()) {
   app.post('/api/support', optionalAuthenticate, asyncRoute(async (req, res) => {
     const body = supportSchema.parse(req.body);
     const { data, error } = await req.supabase.from('support_requests').insert({
-      user_id: req.user?.id || null, name: body.name, phone: body.phone, email: body.email || null,
+      user_id: req.user?.id || null, name: body.name, phone: body.phone, email: body.email,
       subject: body.subject, message: body.message,
     }).select('ticket_number').single();
     if (error) throw error;
-    res.status(201).json({ message: 'Support request submitted', ticketNumber: data.ticket_number });
+    const emailNotification = await sendSupportEmail(supportMailer, {
+      ...body,
+      status: 'open',
+      ticket_number: data.ticket_number,
+    }, 'ticket_created');
+    res.status(201).json({ message: 'Support request submitted', ticketNumber: data.ticket_number, emailNotification });
   }));
   app.get('/api/support/mine', authenticate, asyncRoute(async (req, res) => {
     const { data, error } = await req.supabase.from('support_requests')
@@ -508,15 +537,33 @@ function createApp(config = validateEnvironment()) {
     res.json({ requests: data });
   }));
   app.get('/api/jobs', asyncRoute(async (req, res) => {
-    const { data, error } = await req.supabase.from('job_listings').select('*').eq('is_active', true)
+    const { data, error } = await req.supabase.from('job_listings').select('*')
+      .eq('is_active', true).eq('approval_status', 'approved')
       .order('created_at', { ascending: false }).limit(100);
     if (error) throw error;
     res.json({ jobs: data });
   }));
+  app.get('/api/jobs/mine', authenticate, requireRole('customer', 'business_owner'), asyncRoute(async (req, res) => {
+    const { data, error } = await req.supabase.from('job_listings').select('*')
+      .eq('owner_id', req.user.id).order('created_at', { ascending: false }).limit(100);
+    if (error) throw error;
+    res.json({ jobs: data });
+  }));
+  app.post('/api/jobs', authenticate, requireRole('customer', 'business_owner'), asyncRoute(async (req, res) => {
+    const body = jobListingSchema.parse(req.body);
+    const { data, error } = await req.supabase.from('job_listings').insert({
+      title: body.title, description: body.description, location: body.location,
+      employment_type: body.employmentType, wage_min: body.wageMin, wage_max: body.wageMax,
+      wage_period: body.wagePeriod, requirements: body.requirements, owner_id: req.user.id,
+      approval_status: 'pending', is_active: false,
+    }).select().single();
+    if (error) throw error;
+    res.status(201).json({ job: data });
+  }));
   app.post('/api/jobs/applications', optionalAuthenticate, asyncRoute(async (req, res) => {
     const body = jobApplicationSchema.parse(req.body);
     const { data: job, error: jobError } = await req.supabase.from('job_listings').select('id')
-      .eq('id', body.jobId).eq('is_active', true).maybeSingle();
+      .eq('id', body.jobId).eq('is_active', true).eq('approval_status', 'approved').maybeSingle();
     if (jobError) throw jobError;
     if (!job) throw new HttpError(404, 'JOB_NOT_FOUND', 'This job is no longer available');
     const { error } = await req.supabase.from('job_applications').insert({
@@ -668,18 +715,25 @@ function createApp(config = validateEnvironment()) {
       title: body.title, description: body.description, location: body.location,
       employment_type: body.employmentType, wage_min: body.wageMin, wage_max: body.wageMax,
       wage_period: body.wagePeriod, requirements: body.requirements, is_active: body.isActive,
+      approval_status: 'approved',
     }).select().single();
     if (error) throw error;
     await audit(req.supabase, req.user.id, 'job_listing_created', 'job_listing', data.id, {});
     res.status(201).json({ job: data });
   }));
   app.patch('/api/admin/jobs/:id', authenticate, requireRole(...adminRoles), validateUuidParam(), asyncRoute(async (req, res) => {
-    const { isActive } = z.object({ isActive: z.boolean() }).parse(req.body);
+    const change = z.union([
+      z.object({ isActive: z.boolean() }).strict(),
+      z.object({ approvalStatus: z.enum(['approved', 'rejected']) }).strict(),
+    ]).parse(req.body);
+    const updates = 'approvalStatus' in change
+      ? { approval_status: change.approvalStatus, is_active: change.approvalStatus === 'approved' }
+      : { is_active: change.isActive, ...(change.isActive ? { approval_status: 'approved' } : {}) };
     const { data, error } = await req.supabase.from('job_listings')
-      .update({ is_active: isActive }).eq('id', req.params.id).select().maybeSingle();
+      .update(updates).eq('id', req.params.id).select().maybeSingle();
     if (error) throw error;
     if (!data) throw new HttpError(404, 'JOB_NOT_FOUND', 'Job listing not found');
-    await audit(req.supabase, req.user.id, isActive ? 'job_listing_published' : 'job_listing_closed', 'job_listing', data.id, {});
+    await audit(req.supabase, req.user.id, data.is_active ? 'job_listing_published' : 'job_listing_closed', 'job_listing', data.id, {});
     res.json({ job: data });
   }));
   app.get('/api/admin/job-applications', authenticate, requireRole(...adminRoles), asyncRoute(async (req, res) => {
@@ -695,11 +749,18 @@ function createApp(config = validateEnvironment()) {
   }));
   app.patch('/api/admin/support/:id', authenticate, requireRole(...adminRoles), validateUuidParam(), asyncRoute(async (req, res) => {
     const { status } = z.object({ status: z.enum(['open', 'in_progress', 'resolved']) }).parse(req.body);
+    const { data: current, error: currentError } = await req.supabase.from('support_requests')
+      .select('*').eq('id', req.params.id).maybeSingle();
+    if (currentError) throw currentError;
+    if (!current) throw new HttpError(404, 'SUPPORT_NOT_FOUND', 'Support request not found');
     const { data, error } = await req.supabase.from('support_requests').update({ status }).eq('id', req.params.id).select().maybeSingle();
     if (error) throw error;
     if (!data) throw new HttpError(404, 'SUPPORT_NOT_FOUND', 'Support request not found');
     await audit(req.supabase, req.user.id, `support_${status}`, 'support_request', data.id, {});
-    res.json({ request: data });
+    const emailNotification = current.status === status
+      ? 'not_needed'
+      : await sendSupportEmail(supportMailer, data, 'status_update');
+    res.json({ request: data, emailNotification });
   }));
   app.patch('/api/admin/reviews/:id', authenticate, requireRole(...adminRoles), validateUuidParam(), asyncRoute(async (req, res) => {
     const { isVisible } = z.object({ isVisible: z.boolean() }).parse(req.body);

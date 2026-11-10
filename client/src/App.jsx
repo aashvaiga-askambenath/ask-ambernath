@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import {
-  ArrowLeft, BadgeCheck, Bell, Building2, ChevronRight, Clock3, Droplets, Eye, EyeOff, Heart, Home,
+  ArrowLeft, BadgeCheck, Bell, Briefcase, Building2, ChevronRight, Clock3, Droplets, Eye, EyeOff, Heart, Home,
   LockKeyhole, MapPin, Package, Phone, Plus, Search, Share2, ShieldCheck, SlidersHorizontal, Store,
   Trash2, User, Wrench, X,
 } from 'lucide-react';
@@ -56,6 +56,7 @@ function Shell({ children, pageClass = '', shellClass = '' }) {
     <nav className="bottom-nav" aria-label="Main navigation">
       <NavLink to="/" end><Home size={19}/><span>Home</span></NavLink>
       <NavLink to="/explore"><Search size={19}/><span>Explore</span></NavLink>
+      <NavLink to="/jobs"><Briefcase size={19}/><span>Jobs</span></NavLink>
       <NavLink to="/ask"><span className="ask-pill">✦</span><span>Ask</span></NavLink>
       <NavLink to="/orders"><Package size={19}/><span>Orders</span></NavLink>
       <NavLink to="/account"><User size={19}/><span>Account</span></NavLink>
@@ -1063,7 +1064,17 @@ function AdminSupport() {
   const [refresh, setRefresh] = useState(0);
   const result = useLoad('/admin/support', refresh);
   const toast = useToast();
-  const setStatus = async (request, status) => { try { await api.patch(`/admin/support/${request.id}`, { status }); setRefresh((value) => value + 1); toast('Support request updated'); } catch (error) { toast(error.message,'error'); } };
+  const setStatus = async (request, status) => {
+    try {
+      const result = await api.patch(`/admin/support/${request.id}`, { status });
+      setRefresh((value) => value + 1);
+      if (result.emailNotification === 'sent') toast('Support request updated and email sent');
+      else if (result.emailNotification === 'failed') toast('Support request updated, but its email could not be sent', 'error');
+      else if (result.emailNotification === 'not_configured') toast('Support request updated, but email notifications are not configured', 'error');
+      else if (result.emailNotification === 'no_recipient') toast('Support request updated; no email address is saved for this ticket', 'error');
+      else toast('Support request updated');
+    } catch (error) { toast(error.message,'error'); }
+  };
   if (result.loading) return <Loading/>;
   if (result.error) return <ErrorState message={result.error}/>;
   return result.data.requests.length ? <div className="admin-list">{result.data.requests.map((request) => <article className="card admin-row support-row" key={request.id}><div><b>{request.subject}</b><p>{request.message}</p><small>{request.ticket_number} · {request.name} · {request.phone} · {request.status}</small></div><select value={request.status} onChange={(event) => setStatus(request, event.target.value)}><option value="open">Open</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option></select></article>)}</div> : <EmptyState title="No support requests" text="Customer support tickets will appear here."/>;
@@ -1097,10 +1108,17 @@ function AdminJobs() {
     } catch (error) { toast(error.message, 'error'); }
   };
   const formatWage = (job) => `${money(job.wage_min)}–${money(job.wage_max)} / ${job.wage_period}`;
+  const moderate = async (job, approvalStatus) => {
+    try {
+      await api.patch(`/admin/jobs/${job.id}`, { approvalStatus });
+      setRefresh((value) => value + 1);
+      toast(approvalStatus === 'approved' ? 'Job listing approved and published' : 'Job listing rejected');
+    } catch (error) { toast(error.message, 'error'); }
+  };
   return <section className="admin-list">
     <h2>Job openings</h2>
     {jobs.loading ? <Loading/> : jobs.error ? <ErrorState message={jobs.error}/> : jobs.data.jobs.map((job) =>
-      <article className="card admin-row" key={job.id}><div><b>{job.title}</b><p>{job.location} · {formatWage(job)}</p><small>{job.is_active ? 'Published' : 'Closed'}</small></div><button className="ghost-btn" onClick={() => toggle(job)}>{job.is_active ? 'Close listing' : 'Publish again'}</button></article>)}
+      <article className="card admin-row" key={job.id}><div><b>{job.title}</b><p>{job.location} · {formatWage(job)}</p><small>{job.approval_status === 'pending' ? 'Pending approval' : job.approval_status === 'rejected' ? 'Rejected' : job.is_active ? 'Published' : 'Closed'}</small></div><div className="action-row">{job.approval_status !== 'approved' && <button className="primary-btn" onClick={() => moderate(job, 'approved')}>Approve & publish</button>}{job.approval_status !== 'rejected' && !job.is_active && <button className="ghost-btn" onClick={() => moderate(job, 'rejected')}>Reject</button>}{job.approval_status === 'approved' && <button className="ghost-btn" onClick={() => toggle(job)}>{job.is_active ? 'Close listing' : 'Publish again'}</button>}</div></article>)}
     <form className="card inline-form job-admin-form" onSubmit={save}>
       <h3>Add a wage listing</h3>
       <label>Job title<input required minLength={3} maxLength={120} value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })}/></label>
@@ -1210,21 +1228,23 @@ function Support() {
   const [busy, setBusy] = useState(false);
   const [complete, setComplete] = useState(false);
   const [ticketNumber, setTicketNumber] = useState('');
+  const [emailNotification, setEmailNotification] = useState('');
   const toast = useToast();
   const submit = async (event) => {
     event.preventDefault(); setBusy(true);
     try {
       const result = await api.post('/support', form);
       setTicketNumber(result.ticketNumber);
+      setEmailNotification(result.emailNotification);
       setComplete(true);
-      toast('Support request sent');
+      toast(result.emailNotification === 'sent' ? 'Support request sent; confirmation emailed' : 'Support request received');
     } catch (error) { toast(error.message, 'error'); } finally { setBusy(false); }
   };
   return <Shell><PageHead title="Contact support" text="Send our team a message. We’ll follow up using the contact details you provide."/>
     {contacts.data && (contacts.data.supportEmail || contacts.data.supportPhone || contacts.data.supportWhatsApp) && <div className="card support-contacts"><b>Other ways to reach us</b>{contacts.data.supportEmail && <a href={`mailto:${contacts.data.supportEmail}`}>{contacts.data.supportEmail}</a>}{contacts.data.supportPhone && <a href={`tel:${contacts.data.supportPhone}`}>{contacts.data.supportPhone}</a>}{contacts.data.supportWhatsApp && <a href={`https://wa.me/${contacts.data.supportWhatsApp.replace(/\D/g, '')}?text=${encodeURIComponent('Hi, I need help from Ask Ambernath support.')}`} target="_blank" rel="noreferrer">Chat with support on WhatsApp</a>}</div>}
     <div className="quick-grid support-request-links"><Link className="quick" to="/suggestions"><span className="spark">✦</span><span><b>Suggestion</b><small>Share an idea with us</small></span></Link><Link className="quick" to="/requirements"><span className="spark">⌕</span><span><b>Request a service</b><small>Tell us what Ambernath needs</small></span></Link><Link className="quick" to="/jobs"><span className="spark">₹</span><span><b>Work with us</b><small>See paid job openings</small></span></Link></div>
-    {complete ? <div className="card ticket-confirmation"><h2>Request received</h2><p>Your support ticket number is</p><strong>{ticketNumber}</strong><p>Keep this number for reference. {user ? 'You can check status below.' : 'Sign in before submitting future requests to see status in your account.'}</p><button className="primary-btn" type="button" onClick={() => { setComplete(false); setForm({ ...form, subject: '', message: '' }); }}>Send another request</button></div> :
-      <form className="card auth-form" onSubmit={submit}><label>Name<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })}/></label><label>Phone<input required type="tel" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })}/></label><label>Email (optional)<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })}/></label><label>Subject<input required minLength={3} value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })}/></label><label>Message<textarea required minLength={10} maxLength={5000} value={form.message} onChange={(event) => setForm({ ...form, message: event.target.value })}/></label><button className="primary-btn" disabled={busy}>{busy ? 'Sending…' : 'Send message'}</button></form>}
+    {complete ? <div className="card ticket-confirmation"><h2>Request received</h2><p>Your support ticket number is</p><strong>{ticketNumber}</strong><p>{emailNotification === 'sent' ? `A confirmation was emailed to ${form.email}. Ticket status updates will be emailed to you too.` : emailNotification === 'not_configured' ? 'Your ticket was saved, but support email is not configured yet. Keep this ticket number and check status here if you are signed in.' : 'Your ticket was saved, but its confirmation email could not be sent. Keep this ticket number and check status here if you are signed in.'} {user ? 'You can also check status below.' : 'Sign in before submitting future requests to see status in your account.'}</p><button className="primary-btn" type="button" onClick={() => { setComplete(false); setForm({ ...form, subject: '', message: '' }); }}>Send another request</button></div> :
+      <form className="card auth-form" onSubmit={submit}><label>Name<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })}/></label><label>Phone<input required type="tel" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })}/></label><label>Email for ticket updates<input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })}/><small>We’ll email your ticket number and status updates here.</small></label><label>Subject<input required minLength={3} value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })}/></label><label>Message<textarea required minLength={10} maxLength={5000} value={form.message} onChange={(event) => setForm({ ...form, message: event.target.value })}/></label><button className="primary-btn" disabled={busy}>{busy ? 'Sending…' : 'Send message'}</button></form>}
     {user && <SupportTickets/>}
   </Shell>;
 }
@@ -1234,6 +1254,7 @@ function RequestForm({ kind }) {
   const isSuggestion = kind === 'suggestion';
   const [form, setForm] = useState({ name: user?.name || '', phone: user?.phone || '', email: user?.email || '', service: '', area: '', message: '' });
   const [ticket, setTicket] = useState('');
+  const [emailNotification, setEmailNotification] = useState('');
   const [busy, setBusy] = useState(false);
   const toast = useToast();
   const submit = async (event) => {
@@ -1244,15 +1265,16 @@ function RequestForm({ kind }) {
     try {
       const result = await api.post('/support', { name: form.name, phone: form.phone, email: form.email, subject, message });
       setTicket(result.ticketNumber);
-      toast('Request submitted');
+      setEmailNotification(result.emailNotification);
+      toast(result.emailNotification === 'sent' ? 'Request submitted; confirmation emailed' : 'Request submitted');
     } catch (error) { toast(error.message, 'error'); } finally { setBusy(false); }
   };
   return <Shell><PageHead title={isSuggestion ? 'Share a suggestion' : 'Request a service'} text={isSuggestion ? 'Help us improve the Ambernath community marketplace.' : 'Tell us which service or local business you would like to find.'}/>
-    {ticket ? <div className="card ticket-confirmation"><h2>Thank you for reaching out</h2><p>Your ticket number is <strong>{ticket}</strong>. {user ? 'Track its status on the Contact support page.' : 'Save this number for your records.'}</p><Link className="primary-btn" to="/support">Contact support</Link></div> :
+    {ticket ? <div className="card ticket-confirmation"><h2>Thank you for reaching out</h2><p>Your ticket number is <strong>{ticket}</strong>. {emailNotification === 'sent' ? `A confirmation and future status updates will be emailed to ${form.email}.` : emailNotification === 'not_configured' ? 'Your ticket was saved, but support email is not configured yet. Save this number for your records.' : 'Your ticket was saved, but its confirmation email could not be sent. Save this number for your records.'} {user ? 'Track its status on the Contact support page.' : 'Save this number for your records.'}</p><Link className="primary-btn" to="/support">Contact support</Link></div> :
       <form className="card auth-form request-form" onSubmit={submit}>
         <label>Name<input required minLength={2} maxLength={100} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })}/></label>
         <label>Phone<input required type="tel" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })}/></label>
-        <label>Email (optional)<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })}/></label>
+        <label>Email for ticket updates<input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })}/><small>We’ll email your ticket number and status updates here.</small></label>
         {!isSuggestion && <><label>Service you need<input required minLength={2} maxLength={120} value={form.service} onChange={(event) => setForm({ ...form, service: event.target.value })}/></label><label>Area in Ambernath<input required minLength={2} maxLength={80} value={form.area} onChange={(event) => setForm({ ...form, area: event.target.value })}/></label></>}
         <label>{isSuggestion ? 'Your suggestion' : 'More details'}<textarea required minLength={10} maxLength={5000} value={form.message} onChange={(event) => setForm({ ...form, message: event.target.value })}/></label>
         <button className="primary-btn" disabled={busy}>{busy ? 'Sending…' : isSuggestion ? 'Send suggestion' : 'Send service request'}</button>
@@ -1278,7 +1300,7 @@ function Jobs() {
     } catch (error) { toast(error.message, 'error'); } finally { setBusy(false); }
   };
   const wage = (job) => `${money(job.wage_min)}–${money(job.wage_max)} / ${job.wage_period}`;
-  return <Shell><PageHead title="Work with Ask Ambernath" text="Explore paid openings and apply to join the team."/>
+  return <Shell><PageHead title="Work with Ask Ambernath" text="Explore paid openings and apply to join the team." action={<Link className="primary-btn" to={user ? '/jobs/post' : '/auth?next=%2Fjobs%2Fpost'}>Post a job</Link>}/>
     {selectedJob && !complete && <form className="card auth-form request-form" onSubmit={apply}><h2>Apply: {selectedJob.title}</h2><p>{wage(selectedJob)} · {selectedJob.location}</p>
       <label>Full name<input required minLength={2} maxLength={100} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })}/></label>
       <label>Phone<input required type="tel" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })}/></label>
@@ -1290,6 +1312,48 @@ function Jobs() {
     {result.loading ? <Loading label="Loading job openings…"/> : result.error ? <ErrorState message={result.error}/> : result.data.jobs.length ?
       <div className="job-listings">{result.data.jobs.map((job) => <article className="card job-card" key={job.id}><div className="job-card-heading"><div><h2>{job.title}</h2><p>{job.location} · {job.employment_type.replace('_', ' ')}</p></div><strong>{wage(job)}</strong></div><p>{job.description}</p>{job.requirements && <p><b>Requirements:</b> {job.requirements}</p>}<button className="primary-btn" onClick={() => { setSelectedJob(job); setComplete(false); }}>Apply now</button></article>)}</div> :
       <EmptyState title="No open positions right now" text="Check back soon for paid opportunities with Ask Ambernath."/>}
+  </Shell>;
+}
+
+function PostJob() {
+  const { user } = useAuth();
+  const [refresh, setRefresh] = useState(0);
+  const listings = useLoad('/jobs/mine', refresh);
+  const [form, setForm] = useState({
+    title: '', description: '', location: 'Ambernath', employmentType: 'full_time',
+    wageMin: '', wageMax: '', wagePeriod: 'month', requirements: '',
+  });
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+  const save = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      await api.post('/jobs', { ...form, wageMin: Number(form.wageMin), wageMax: Number(form.wageMax) });
+      setForm({ title: '', description: '', location: 'Ambernath', employmentType: 'full_time', wageMin: '', wageMax: '', wagePeriod: 'month', requirements: '' });
+      setRefresh((value) => value + 1);
+      toast('Job submitted for admin approval');
+    } catch (error) { toast(error.message, 'error'); } finally { setBusy(false); }
+  };
+  if (!user) return <Shell><PageHead title="Post a job" text="Share your opening with people looking for work in Ambernath."/>
+    <div className="card"><p>Sign in to add a job. New listings go live after admin approval.</p><Link className="primary-btn" to="/auth?next=%2Fjobs%2Fpost">Sign in to post a job</Link></div>
+  </Shell>;
+  if (!['customer', 'business_owner'].includes(user.role)) return <Shell><EmptyState title="Access restricted" text="Your account cannot post job listings."/></Shell>;
+  return <Shell><PageHead title="Post a job" text="Add the role, requirements, location and pay. Your listing will be reviewed before it appears publicly."/>
+    <form className="card inline-form job-admin-form" onSubmit={save}>
+      <label>Job title<input required minLength={3} maxLength={120} value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })}/></label>
+      <label>Description<textarea required minLength={10} maxLength={5000} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })}/></label>
+      <label>Location<input required minLength={2} maxLength={120} value={form.location} onChange={(event) => setForm({ ...form, location: event.target.value })}/></label>
+      <label>Employment type<select value={form.employmentType} onChange={(event) => setForm({ ...form, employmentType: event.target.value })}><option value="full_time">Full-time</option><option value="part_time">Part-time</option><option value="contract">Contract</option><option value="internship">Internship</option></select></label>
+      <div className="job-wage-fields"><label>Minimum wage (₹)<input type="number" min="0" max="10000000" step="0.01" required value={form.wageMin} onChange={(event) => setForm({ ...form, wageMin: event.target.value })}/></label><label>Maximum wage (₹)<input type="number" min="0" max="10000000" step="0.01" required value={form.wageMax} onChange={(event) => setForm({ ...form, wageMax: event.target.value })}/></label><label>Per<select value={form.wagePeriod} onChange={(event) => setForm({ ...form, wagePeriod: event.target.value })}><option value="hour">Hour</option><option value="day">Day</option><option value="month">Month</option></select></label></div>
+      <label>Requirements<textarea maxLength={3000} value={form.requirements} onChange={(event) => setForm({ ...form, requirements: event.target.value })}/></label>
+      <button className="primary-btn" disabled={busy}>{busy ? 'Submitting…' : 'Submit for approval'}</button>
+    </form>
+    <section className="admin-list"><h2>Your job listings</h2>
+      {listings.loading ? <Loading/> : listings.error ? <ErrorState message={listings.error}/> : listings.data.jobs.length ?
+        listings.data.jobs.map((job) => <article className="card admin-row" key={job.id}><div><b>{job.title}</b><p>{job.location} · {money(job.wage_min)}–{money(job.wage_max)} / {job.wage_period}</p><small>{job.approval_status === 'pending' ? 'Pending admin approval' : job.approval_status === 'rejected' ? 'Not approved' : job.is_active ? 'Published' : 'Closed'}</small></div></article>) :
+        <EmptyState title="No job listings yet" text="Your submitted job listings will appear here."/>}
+    </section>
   </Shell>;
 }
 
@@ -1353,7 +1417,7 @@ export default function App() {
     <Route path="/account/favorites" element={<Require roles={['customer']}><Favorites/></Require>}/><Route path="/account/notifications" element={<Require><Notifications/></Require>}/>
     <Route path="/auth" element={<AuthPage/>}/><Route path="/list-business" element={<Require roles={['business_owner']}><ListBusiness/></Require>}/>
     <Route path="/business" element={<Require roles={['business_owner']}><BusinessPortal/></Require>}/><Route path="/admin" element={<Require roles={['admin','super_admin']}><Admin/></Require>}/>
-    <Route path="/support" element={<Support/>}/><Route path="/jobs" element={<Jobs/>}/><Route path="/suggestions" element={<RequestForm kind="suggestion"/>}/><Route path="/requirements" element={<RequestForm kind="requirement"/>}/><Route path="/terms" element={<LegalPage title="Terms of service" content={legalContent.terms}/>}/>
+    <Route path="/support" element={<Support/>}/><Route path="/jobs" element={<Jobs/>}/><Route path="/jobs/post" element={<PostJob/>}/><Route path="/suggestions" element={<RequestForm kind="suggestion"/>}/><Route path="/requirements" element={<RequestForm kind="requirement"/>}/><Route path="/terms" element={<LegalPage title="Terms of service" content={legalContent.terms}/>}/>
     <Route path="/privacy" element={<LegalPage title="Privacy policy" content={legalContent.privacy}/>}/><Route path="/cancellation" element={<LegalPage title="Cancellation policy" content={legalContent.cancellation}/>}/>
     <Route path="*" element={<NotFound/>}/>
   </Routes></ToastProvider>;

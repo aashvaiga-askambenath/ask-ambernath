@@ -60,7 +60,7 @@ const reviewSchema = z.object({
 });
 const supportSchema = z.object({
   name: z.string().trim().min(2).max(100), phone: z.string().trim().regex(/^\+?[0-9 ()-]{8,18}$/),
-  email: z.string().email().max(254).optional().or(z.literal('')),
+  email: z.string().trim().email().max(254),
   subject: z.string().trim().min(3).max(160), message: z.string().trim().min(10).max(5000),
 });
 const jobListingSchema = z.object({

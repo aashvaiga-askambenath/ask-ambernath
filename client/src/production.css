@@ -753,6 +753,7 @@ button:disabled {
 .load-more { display: flex; margin: 16px auto; }
 .empty .primary-btn,
 .empty .ghost-btn { margin-top: 8px; }
+.bottom-nav { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .bottom-nav a { min-height: 39px; justify-content: center; }
 .bottom-nav a.active { font-weight: 900; }
 .page { padding-bottom: calc(100px + env(safe-area-inset-bottom)); }
